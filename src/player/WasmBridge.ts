@@ -11,6 +11,10 @@
 import { WebCodecsDecoder, type DecodedVideoFrame } from './WebCodecsDecoder';
 import { Demuxer, type VideoSample, type AudioSample } from './Demuxer';
 import { FFmpegDecoder, type TranscodeProgress } from './FFmpegDecoder';
+import { createLogger } from '../utils/debug';
+import { FastQueue } from '../utils/FastQueue';
+
+const log = createLogger({ module: 'WasmBridge' });
 
 /**
  * Video metadata
@@ -93,9 +97,9 @@ export class WasmBridge {
   private initialized: boolean = false;
   private metadata: VideoMetadata | null = null;
   private backend: DecoderBackend = 'none';
-  private videoSampleQueue: VideoSample[] = [];
-  private audioSampleQueue: AudioSample[] = [];
-  private webCodecsFrameQueue: DecodedFrame[] = [];
+  private videoSampleQueue = new FastQueue<VideoSample>(128);
+  private audioSampleQueue = new FastQueue<AudioSample>(128);
+  private webCodecsFrameQueue = new FastQueue<DecodedFrame>(32);
   // Persistent storage for all samples (for seeking)
   private allVideoSamples: VideoSample[] = [];
   private allAudioSamples: AudioSample[] = [];
@@ -133,7 +137,7 @@ export class WasmBridge {
           onError?: (error: Error) => void;
         } = {
           onError: (error: Error) => {
-            console.error('FFmpeg decoder error:', error);
+            log.error('FFmpeg decoder error:', error);
           },
         };
 
@@ -148,7 +152,7 @@ export class WasmBridge {
 
         const ffmpegSuccess = await this.ffmpegDecoder.init();
         if (ffmpegSuccess) {
-          console.info('FFmpeg.wasm backend initialized');
+          log.info('FFmpeg.wasm backend initialized');
         } else {
           this.ffmpegDecoder = null;
           errors.push('FFmpeg.wasm initialization failed');
@@ -168,7 +172,7 @@ export class WasmBridge {
           this.handleWebCodecsVideoFrame(frame);
         },
         onError: (error: Error) => {
-          console.error('WebCodecs decoder error:', error);
+          log.error('WebCodecs decoder error:', error);
         },
       });
 
@@ -183,7 +187,7 @@ export class WasmBridge {
           },
         });
         this.demuxer.init();
-        console.info('WebCodecs backend initialized');
+        log.info('WebCodecs backend initialized');
       } else {
         this.webCodecsDecoder = null;
         errors.push('WebCodecs initialization failed');
@@ -197,7 +201,7 @@ export class WasmBridge {
       const wasm = await import('../../pkg/player_core');
       await wasm.default();
       this.wasmModule = wasm as unknown as WasmModule;
-      console.info('WASM backend initialized');
+      log.info('WASM backend initialized');
     } catch (error) {
       errors.push(`WASM: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -218,7 +222,7 @@ export class WasmBridge {
     }
 
     this.initialized = true;
-    console.info(`Primary decoder backend: ${this.backend}`);
+    log.info('Primary decoder backend:', this.backend);
   }
 
   /**
@@ -247,7 +251,7 @@ export class WasmBridge {
         });
       })
       .catch((error: Error) => {
-        console.error('Failed to copy frame data:', error);
+        log.error('Failed to copy frame data:', error);
       })
       .finally(() => {
         // Release the VideoFrame
@@ -388,9 +392,9 @@ export class WasmBridge {
     }
 
     // Reset state for new video
-    this.videoSampleQueue = [];
-    this.audioSampleQueue = [];
-    this.webCodecsFrameQueue = [];
+    this.videoSampleQueue.clear();
+    this.audioSampleQueue.clear();
+    this.webCodecsFrameQueue.clear();
     // Reset persistent sample storage
     this.allVideoSamples = [];
     this.allAudioSamples = [];
@@ -411,7 +415,7 @@ export class WasmBridge {
         this.allVideoSamples.push(sample);
         // Debug: log first and every 100th sample
         if (this.allVideoSamples.length === 1 || this.allVideoSamples.length % 100 === 0) {
-          console.log('[WasmBridge] Sample stored:', this.allVideoSamples.length, 'timestamp:', sample.timestamp, 'keyframe:', sample.keyframe);
+          log.debug('Sample stored:', this.allVideoSamples.length, 'timestamp:', sample.timestamp, 'keyframe:', sample.keyframe);
         }
       },
       onAudioSample: (sample: AudioSample) => {
@@ -430,7 +434,7 @@ export class WasmBridge {
           const videoTrack = info.videoTracks[0];
           if (videoTrack) {
             // Log track info for debugging
-            console.log('[WasmBridge] Video track:', {
+            log.debug('Video track:', {
               codec: videoTrack.codec,
               width: videoTrack.codedWidth,
               height: videoTrack.codedHeight,
@@ -513,14 +517,14 @@ export class WasmBridge {
     // Skip frames before seek target (they're needed for decoding but not for display)
     // Do this in a loop to avoid deep recursion
     while (this.webCodecsFrameQueue.length > 0 && this.seekTargetTimestamp > 0) {
-      const frame = this.webCodecsFrameQueue[0]!;
+      const frame = this.webCodecsFrameQueue.peek()!;
       if (frame.timestamp < this.seekTargetTimestamp) {
         // Skip this frame
         this.webCodecsFrameQueue.shift();
         continue;
       }
       // Found a frame at or after target
-      console.log('[WasmBridge] Seek complete: reached target, frame timestamp=', frame.timestamp, 'target=', this.seekTargetTimestamp);
+      log.debug('Seek complete: reached target, frame timestamp=', frame.timestamp, 'target=', this.seekTargetTimestamp);
       this.seekTargetTimestamp = 0;
       break;
     }
@@ -535,9 +539,9 @@ export class WasmBridge {
       return null;
     }
 
-    // Debug: log queue status when seeking
-    if (this.seekTargetTimestamp > 0) {
-      console.log('[WasmBridge] Seeking: frameQueue=', this.webCodecsFrameQueue.length,
+    // Debug: log queue status when seeking (throttled to avoid spam)
+    if (this.seekTargetTimestamp > 0 && this.videoSampleQueue.length % 50 === 0) {
+      log.debug('Seeking: frameQueue=', this.webCodecsFrameQueue.length,
         'sampleQueue=', this.videoSampleQueue.length, 'target=', this.seekTargetTimestamp);
     }
 
@@ -547,7 +551,7 @@ export class WasmBridge {
       // Skip non-keyframe samples until we get a keyframe
       if (this.needsKeyframe) {
         while (this.videoSampleQueue.length > 0) {
-          const sample = this.videoSampleQueue[0]!;
+          const sample = this.videoSampleQueue.peek()!;
           if (sample.keyframe) {
             this.needsKeyframe = false;
             break;
@@ -608,7 +612,7 @@ export class WasmBridge {
       await this.webCodecsDecoder?.flushAudio();
 
       // Clear frame queue AFTER flush to discard any produced frames
-      this.webCodecsFrameQueue = [];
+      this.webCodecsFrameQueue.clear();
 
       // Need keyframe after flush
       this.needsKeyframe = true;
@@ -630,17 +634,25 @@ export class WasmBridge {
         }
       }
 
-      console.log('[WasmBridge] seek: target=', timestamp, 's',
+      log.debug('seek: target=', timestamp, 's',
         'keyframeIndex=', keyframeIndex, 'totalSamples=', this.allVideoSamples.length);
 
       // Re-populate video queue from keyframe
-      this.videoSampleQueue = this.allVideoSamples.slice(keyframeIndex);
+      this.videoSampleQueue.clear();
+      for (let i = keyframeIndex; i < this.allVideoSamples.length; i++) {
+        this.videoSampleQueue.push(this.allVideoSamples[i]);
+      }
 
       // For audio, find samples at or after target time
+      this.audioSampleQueue.clear();
       const audioStartIndex = this.allAudioSamples.findIndex(s => s.timestamp >= targetTimestampUs);
-      this.audioSampleQueue = audioStartIndex >= 0 ? this.allAudioSamples.slice(audioStartIndex) : [];
+      if (audioStartIndex >= 0) {
+        for (let i = audioStartIndex; i < this.allAudioSamples.length; i++) {
+          this.audioSampleQueue.push(this.allAudioSamples[i]);
+        }
+      }
 
-      console.log('[WasmBridge] seek: videoQueue=', this.videoSampleQueue.length,
+      log.debug('seek: videoQueue=', this.videoSampleQueue.length,
         'audioQueue=', this.audioSampleQueue.length);
     }
   }
@@ -718,9 +730,9 @@ export class WasmBridge {
       this.demuxer = null;
     }
 
-    this.videoSampleQueue = [];
-    this.audioSampleQueue = [];
-    this.webCodecsFrameQueue = [];
+    this.videoSampleQueue.clear();
+    this.audioSampleQueue.clear();
+    this.webCodecsFrameQueue.clear();
     this.transcodedBuffer = null;
     this.initialized = false;
     this.metadata = null;

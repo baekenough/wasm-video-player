@@ -6,6 +6,9 @@
  */
 
 import type { SettingsData } from '@settings/types';
+import { createLogger } from '@/utils/debug';
+
+const log = createLogger({ module: 'KeyboardHandler' });
 
 /**
  * Key codes for common shortcuts
@@ -120,28 +123,28 @@ export class KeyboardHandler {
    * Handle keydown events
    */
   private handleKeydown(event: KeyboardEvent): void {
-    console.log('[KeyboardHandler] keydown:', event.key, event.code, 'enabled:', this.enabled);
+    log.debug('keydown:', event.key, event.code, 'enabled:', this.enabled);
 
     if (!this.enabled) {
-      console.log('[KeyboardHandler] disabled, ignoring');
+      log.debug('disabled, ignoring');
       return;
     }
 
     // Ignore events with Ctrl, Alt, or Meta modifiers (except Shift)
     if (event.ctrlKey || event.altKey || event.metaKey) {
-      console.log('[KeyboardHandler] modifier key, ignoring');
+      log.debug('modifier key, ignoring');
       return;
     }
 
     // Ignore events from input elements
     const target = event.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-      console.log('[KeyboardHandler] input element, ignoring');
+      log.debug('input element, ignoring');
       return;
     }
 
     const handled = this.processKey(event);
-    console.log('[KeyboardHandler] handled:', handled);
+    log.debug('handled:', handled);
 
     if (handled) {
       event.preventDefault();

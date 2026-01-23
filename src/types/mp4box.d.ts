@@ -2,11 +2,21 @@
  * Type definitions for mp4box.js
  *
  * Minimal types for the features used in Demuxer.ts
+ * Note: Some mp4box internals (moov.traks, etc.) are accessed via 'any'
+ * because they're not part of the public API and shouldn't be typed.
  */
 
 declare module 'mp4box' {
   export interface MP4ArrayBuffer extends ArrayBuffer {
     fileStart: number;
+  }
+
+  /**
+   * Codec configuration box interface (avcC, hvcC, vpcC, av1C)
+   * These boxes have a write() method for serialization
+   */
+  export interface CodecConfigBox {
+    write(stream: DataStream): void;
   }
 
   export interface Sample {
@@ -61,10 +71,10 @@ declare module 'mp4box' {
         stbl?: {
           stsd?: {
             entries?: Array<{
-              avcC?: unknown;
-              hvcC?: unknown;
-              vpcC?: unknown;
-              av1C?: unknown;
+              avcC?: CodecConfigBox;
+              hvcC?: CodecConfigBox;
+              vpcC?: CodecConfigBox;
+              av1C?: CodecConfigBox;
               esds?: {
                 esd?: {
                   descs?: Array<{

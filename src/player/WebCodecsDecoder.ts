@@ -9,6 +9,8 @@
  * - Browser support for Web Codecs API (Chrome 94+, Edge 94+)
  */
 
+import { FastQueue } from '../utils/FastQueue';
+
 /**
  * Decoded video frame data
  */
@@ -69,8 +71,8 @@ export interface AudioCodecConfig {
 export class WebCodecsDecoder {
   private videoDecoder: VideoDecoder | null = null;
   private audioDecoder: AudioDecoder | null = null;
-  private videoFrameQueue: DecodedVideoFrame[] = [];
-  private audioDataQueue: DecodedAudioData[] = [];
+  private videoFrameQueue = new FastQueue<DecodedVideoFrame>(32);
+  private audioDataQueue = new FastQueue<DecodedAudioData>(64);
   private readonly config: WebCodecsDecoderConfig;
   private videoInitialized: boolean = false;
   private audioInitialized: boolean = false;
@@ -433,20 +435,20 @@ export class WebCodecsDecoder {
    * Clear the video frame queue and release resources
    */
   clearVideoQueue(): void {
-    for (const item of this.videoFrameQueue) {
+    let item: DecodedVideoFrame | undefined;
+    while ((item = this.videoFrameQueue.shift()) !== undefined) {
       item.frame.close();
     }
-    this.videoFrameQueue = [];
   }
 
   /**
    * Clear the audio data queue and release resources
    */
   clearAudioQueue(): void {
-    for (const item of this.audioDataQueue) {
+    let item: DecodedAudioData | undefined;
+    while ((item = this.audioDataQueue.shift()) !== undefined) {
       item.data.close();
     }
-    this.audioDataQueue = [];
   }
 
   /**

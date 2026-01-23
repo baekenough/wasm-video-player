@@ -8,6 +8,9 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - mp4box doesn't have proper TypeScript definitions
 import MP4Box, { type ISOFile, type MP4ArrayBuffer, type MP4Info, type Sample, type Track } from 'mp4box';
+import { createLogger } from '../utils/debug';
+
+const log = createLogger({ module: 'Demuxer' });
 
 /**
  * Video track information extracted from MP4
@@ -133,7 +136,7 @@ function mapAudioCodec(codecString: string): string {
  */
 function extractDescription(track: Track): Uint8Array | undefined {
   // Debug: log track structure
-  console.log('[Demuxer] Track structure for description:', {
+  log.debug('[Demuxer] Track structure for description:', {
     hasMdia: !!track.mdia,
     hasMinf: !!track.mdia?.minf,
     hasStbl: !!track.mdia?.minf?.stbl,
@@ -143,30 +146,30 @@ function extractDescription(track: Track): Uint8Array | undefined {
 
   const entry = track.mdia?.minf?.stbl?.stsd?.entries?.[0];
   if (!entry) {
-    console.log('[Demuxer] No stsd entry found');
+    log.debug('[Demuxer] No stsd entry found');
     return undefined;
   }
 
   // Debug: log entry keys
-  console.log('[Demuxer] Entry keys:', Object.keys(entry));
+  log.debug('[Demuxer] Entry keys:', Object.keys(entry));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  console.log('[Demuxer] Has avcC:', !!(entry as any).avcC);
+  log.debug('[Demuxer] Has avcC:', !!(entry as any).avcC);
 
   // Helper to write box to buffer
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const writeBoxToBuffer = (box: any): Uint8Array | undefined => {
     if (!box || typeof box.write !== 'function') {
-      console.log('[Demuxer] Box has no write method:', { hasBox: !!box, type: typeof box?.write });
+      log.debug('[Demuxer] Box has no write method:', { hasBox: !!box, type: typeof box?.write });
       return undefined;
     }
     try {
       const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
       box.write(stream);
       const result = new Uint8Array(stream.buffer, 8); // Skip box header
-      console.log('[Demuxer] Extracted description:', result.length, 'bytes');
+      log.debug('[Demuxer] Extracted description:', result.length, 'bytes');
       return result;
     } catch (error) {
-      console.error('[Demuxer] Failed to write box:', error);
+      log.error('[Demuxer] Failed to write box:', error);
       return undefined;
     }
   };
@@ -264,7 +267,7 @@ export class Demuxer {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const moov = (this.mp4file as any)?.moov;
     if (!moov?.traks) {
-      console.log('[Demuxer] No moov.traks found');
+      log.debug('[Demuxer] No moov.traks found');
       return null;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -281,7 +284,7 @@ export class Demuxer {
     // Debug: log moov structure
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const moov = (this.mp4file as any)?.moov;
-    console.log('[Demuxer] moov structure:', {
+    log.debug('[Demuxer] moov structure:', {
       hasMoov: !!moov,
       traksCount: moov?.traks?.length,
     });
@@ -313,7 +316,7 @@ export class Demuxer {
         }
       }
 
-      console.log('[Demuxer] Track duration calculation:', {
+      log.debug('[Demuxer] Track duration calculation:', {
         rawDuration: track.duration,
         timescale: track.timescale,
         nbSamples: track.nb_samples,
@@ -323,7 +326,7 @@ export class Demuxer {
 
       // Get full track box from moov.traks for description extraction
       const trackBox = this.getTrackBox(track.id);
-      console.log('[Demuxer] Track box for id', track.id, ':', {
+      log.debug('[Demuxer] Track box for id', track.id, ':', {
         found: !!trackBox,
         hasMdia: !!trackBox?.mdia,
         hasMinf: !!trackBox?.mdia?.minf,
@@ -371,7 +374,7 @@ export class Demuxer {
     if (overallDuration <= 0 && audioTracks.length > 0) {
       overallDuration = audioTracks[0]!.duration;
     }
-    console.log('[Demuxer] Duration calculation:', {
+    log.debug('[Demuxer] Duration calculation:', {
       infoDuration: info.duration,
       timescale: info.timescale,
       calculated: info.duration / info.timescale,
@@ -494,11 +497,11 @@ export class Demuxer {
       throw new Error('Demuxer not initialized');
     }
 
-    console.log('[Demuxer] seek called with time:', time);
+    log.debug('[Demuxer] seek called with time:', time);
 
     // For streaming scenarios, seek positions the mp4box extraction point
     const result = this.mp4file.seek(time, true);
-    console.log('[Demuxer] seek result:', result);
+    log.debug('[Demuxer] seek result:', result);
 
     return {
       time: result.time ?? 0,

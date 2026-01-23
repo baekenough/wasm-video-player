@@ -122,6 +122,8 @@ export class FFmpegDecoder {
   private currentInputFile: string | null = null;
   private metadata: FFmpegVideoMetadata | null = null;
   private abortController: AbortController | null = null;
+  private disposed: boolean = false;
+  private pendingInitIntervals: Set<ReturnType<typeof setInterval>> = new Set();
 
   constructor(config: FFmpegDecoderConfig = {}) {
     this.config = {
@@ -201,11 +203,19 @@ export class FFmpegDecoder {
       // Wait for ongoing loading to complete
       return new Promise((resolve) => {
         const checkLoaded = setInterval(() => {
+          if (this.disposed) {
+            clearInterval(checkLoaded);
+            this.pendingInitIntervals.delete(checkLoaded);
+            resolve(false);
+            return;
+          }
           if (!this.loading) {
             clearInterval(checkLoaded);
+            this.pendingInitIntervals.delete(checkLoaded);
             resolve(this.loaded);
           }
         }, 100);
+        this.pendingInitIntervals.add(checkLoaded);
       });
     }
 
@@ -623,7 +633,14 @@ export class FFmpegDecoder {
    * Clean up resources
    */
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.abort();
+
+    // Clear any pending init intervals
+    for (const interval of this.pendingInitIntervals) {
+      clearInterval(interval);
+    }
+    this.pendingInitIntervals.clear();
 
     if (this.currentInputFile && this.ffmpeg) {
       try {

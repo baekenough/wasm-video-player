@@ -59,7 +59,8 @@ describe('KeyboardHandler', () => {
 
       expect(addEventListenerSpy).toHaveBeenCalledWith(
         'keydown',
-        expect.any(Function)
+        expect.any(Function),
+        true // capture phase
       );
     });
 
@@ -71,7 +72,8 @@ describe('KeyboardHandler', () => {
 
       expect(removeEventListenerSpy).toHaveBeenCalledWith(
         'keydown',
-        expect.any(Function)
+        expect.any(Function),
+        true // capture phase
       );
     });
 

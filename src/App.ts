@@ -28,6 +28,9 @@ import { Settings, LocalStorageAdapter, SettingsPanel } from '@settings/index';
 import { SubtitleManager, SubtitleRenderer } from '@subtitle/index';
 import { KeyboardHandler, type KeyboardCallbacks } from '@input/KeyboardHandler';
 import { getWatchHistory } from '@/storage/WatchHistory';
+import { createLogger } from '@/utils/debug';
+
+const log = createLogger({ module: 'App' });
 
 /**
  * Application configuration
@@ -148,9 +151,9 @@ export class App {
       // Start update loop
       this.startUpdateLoop();
 
-      console.log('WASM Video Player initialized successfully');
+      log.info('WASM Video Player initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize WASM Video Player:', error);
+      log.error('Failed to initialize WASM Video Player:', error);
       throw error;
     }
   }
@@ -166,7 +169,7 @@ export class App {
     try {
       await this.settings.load();
     } catch (error) {
-      console.warn('Failed to load saved settings, using defaults:', error);
+      log.warn('Failed to load saved settings, using defaults:', error);
     }
   }
 
@@ -215,7 +218,7 @@ export class App {
 
     const videoContainer = this.container.querySelector('#video-container') as HTMLElement;
     if (!videoContainer) {
-      console.warn('Video container not found, skipping UI initialization');
+      log.warn('Video container not found, skipping UI initialization');
       return;
     }
 
@@ -246,7 +249,7 @@ export class App {
         await this.handleVideoFileSelected(file);
       },
       onError: (error) => {
-        console.error('[FileLoader] Error:', error.message);
+        log.error('[FileLoader] Error:', error.message);
       },
     });
 
@@ -340,7 +343,7 @@ export class App {
       this.playlist.forEach(p => p.active = p.id === id);
       this.layoutManager?.setPlaylist(this.playlist);
       // Note: Actual file loading would require storing file references
-      console.log('Selected playlist item:', item.name);
+      log.debug('Selected playlist item:', item.name);
     }
   }
 
@@ -397,7 +400,7 @@ export class App {
   private initTimelineThumbnails(): void {
     const thumbnailContainer = this.container.querySelector('#timeline-thumbnails-container') as HTMLElement;
     if (!thumbnailContainer) {
-      console.warn('Timeline thumbnails container not found');
+      log.warn('Timeline thumbnails container not found');
       return;
     }
 
@@ -409,13 +412,13 @@ export class App {
         this.player?.seek(timestamp * 1000);
       },
       onGenerationStart: () => {
-        console.log('Thumbnail generation started');
+        log.debug('Thumbnail generation started');
       },
       onGenerationComplete: () => {
-        console.log('Thumbnail generation completed');
+        log.debug('Thumbnail generation completed');
       },
       onGenerationProgress: (current, total) => {
-        console.log(`Generating thumbnails: ${current}/${total}`);
+        log.debug(`Generating thumbnails: ${current}/${total}`);
       },
     });
 
@@ -428,7 +431,7 @@ export class App {
   private async initFolderBrowser(): Promise<void> {
     // Check if File System Access API is supported
     if (!isFileSystemAccessSupported()) {
-      console.warn('File System Access API not supported, folder browser will show fallback');
+      log.warn('File System Access API not supported, folder browser will show fallback');
     }
 
     // Initialize folder browser
@@ -441,7 +444,7 @@ export class App {
           this.fileList?.setFolder(handle);
         },
         onError: (error) => {
-          console.error('[FolderBrowser] Error:', error.message);
+          log.error('[FolderBrowser] Error:', error.message);
         },
       });
 
@@ -462,7 +465,7 @@ export class App {
           this.player?.play();
         },
         onError: (error) => {
-          console.error('[FileList] Error:', error.message);
+          log.error('[FileList] Error:', error.message);
         },
       });
 
@@ -482,7 +485,7 @@ export class App {
   private initSubtitleComponents(): void {
     const subtitleCanvas = document.getElementById(this.config.subtitleCanvasId) as HTMLCanvasElement;
     if (!subtitleCanvas) {
-      console.warn('Subtitle canvas not found, skipping subtitle initialization');
+      log.warn('Subtitle canvas not found, skipping subtitle initialization');
       return;
     }
 
@@ -517,13 +520,13 @@ export class App {
       onSeekForward: (delta, _isLongSeek) => {
         const currentTime = this.player!.getCurrentTime();
         // Both delta and currentTime are in seconds
-        console.log('[App] seekForward: currentTime=', currentTime, 'delta=', delta, 'target=', currentTime + delta);
+        log.debug('seekForward: currentTime=', currentTime, 'delta=', delta, 'target=', currentTime + delta);
         this.player!.seek(currentTime + delta);
       },
       onSeekBackward: (delta, _isLongSeek) => {
         const currentTime = this.player!.getCurrentTime();
         // Both delta and currentTime are in seconds
-        console.log('[App] seekBackward: currentTime=', currentTime, 'delta=', delta, 'target=', currentTime - delta);
+        log.debug('seekBackward: currentTime=', currentTime, 'delta=', delta, 'target=', currentTime - delta);
         this.player!.seek(currentTime - delta);
       },
       onVolumeUp: (delta) => {
@@ -536,11 +539,11 @@ export class App {
       },
       onTogglePlay: () => {
         const state = this.player!.getState();
-        console.log('[App] onTogglePlay called, state:', state);
+        log.debug('onTogglePlay called, state:', state);
         if (state === PlayerState.Playing) {
           this.player!.pause();
         } else {
-          this.player!.play().catch((err) => console.error('[App] play() failed:', err));
+          this.player!.play().catch((err) => log.error('play() failed:', err));
         }
       },
       onToggleMute: () => {
@@ -619,9 +622,9 @@ export class App {
       // Generate timeline thumbnails
       await this.generateTimelineThumbnails(file);
 
-      console.log('Video loaded:', file.name);
+      log.info('Video loaded:', file.name);
     } catch (error) {
-      console.error('Failed to load video:', error);
+      log.error('Failed to load video:', error);
     }
   }
 
@@ -635,7 +638,7 @@ export class App {
 
     const ffmpegDecoder = this.wasmBridge.getFFmpegDecoder();
     if (!ffmpegDecoder) {
-      console.warn('FFmpeg decoder not available, cannot generate thumbnails');
+      log.warn('FFmpeg decoder not available, cannot generate thumbnails');
       return;
     }
 
@@ -646,7 +649,7 @@ export class App {
       // Generate new thumbnails
       await this.timelineThumbnails.generateThumbnails(ffmpegDecoder, file);
     } catch (error) {
-      console.error('Failed to generate timeline thumbnails:', error);
+      log.error('Failed to generate timeline thumbnails:', error);
     }
   }
 
@@ -660,9 +663,9 @@ export class App {
 
     try {
       await this.subtitleManager.loadFile(file);
-      console.log('Subtitle loaded:', file.name);
+      log.info('Subtitle loaded:', file.name);
     } catch (error) {
-      console.error('Failed to load subtitle:', error);
+      log.error('Failed to load subtitle:', error);
     }
   }
 
@@ -730,7 +733,7 @@ export class App {
     }
 
     // Save settings after change
-    this.settings?.save().catch(console.error);
+    this.settings?.save().catch((err) => log.error('Failed to save settings:', err));
   }
 
   /**
@@ -1016,6 +1019,6 @@ export class App {
     // Clear video file reference
     this._currentVideoFile = null;
 
-    console.log('WASM Video Player disposed');
+    log.info('WASM Video Player disposed');
   }
 }

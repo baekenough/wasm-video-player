@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WASM Video Player</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/src/styles/index.css" />
+  </head>
+  <body>
+    <div id="app" class="app-layout">
+      <!-- Left Panel: Timeline Thumbnails -->
+      <aside id="panel-left" class="panel panel-left">
+        <header class="panel-header">
+          <h2 class="panel-title">Timeline</h2>
+          <button class="panel-toggle" aria-label="Toggle panel">
+            <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+          </button>
+        </header>
+        <div class="panel-content">
+          <!-- Timeline Thumbnails Container -->
+          <div id="timeline-thumbnails-container"></div>
+        </div>
+        <footer class="panel-footer">
+          <button id="add-file-btn" class="add-file-button">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor"/></svg>
+            Add File
+          </button>
+        </footer>
+      </aside>
+
+      <!-- Resize Handle: Left Panel / Center -->
+      <div class="panel-resizer panel-resizer-left" role="separator" aria-label="Resize left panel" aria-orientation="vertical"></div>
+
+      <!-- Center Panel: Video Player -->
+      <main id="panel-center" class="panel-center">
+        <div class="video-title-bar">
+          <h1 id="video-title" class="video-title">No video loaded</h1>
+          <div class="video-title-actions">
+            <!-- Action buttons can be added here -->
+          </div>
+        </div>
+        <div id="video-container" tabindex="0">
+          <canvas id="video-canvas"></canvas>
+          <canvas id="subtitle-canvas"></canvas>
+          <div id="file-loader-container"></div>
+          <div id="controls-container"></div>
+        </div>
+      </main>
+
+      <!-- Resize Handle: Center / Right Panel -->
+      <div class="panel-resizer panel-resizer-right" role="separator" aria-label="Resize right panel" aria-orientation="vertical"></div>
+
+      <!-- Right Panel: Folder Browser / File List -->
+      <aside id="panel-right" class="panel panel-right">
+        <header class="panel-header">
+          <h2 class="panel-title">Browse</h2>
+          <button class="panel-toggle" aria-label="Toggle panel">
+            <svg viewBox="0 0 24 24"><path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>
+          </button>
+        </header>
+        <div class="panel-content">
+          <!-- Top Section: Folder Browser (40%) -->
+          <div id="panel-right-top" class="panel-right-top">
+            <div id="folder-browser-container"></div>
+          </div>
+
+          <!-- Bottom Section: File List (60%) -->
+          <div id="panel-right-bottom" class="panel-right-bottom">
+            <div id="file-list-container"></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Panel Overlay (for tablet/mobile) -->
+      <div id="panel-overlay" class="panel-overlay"></div>
+
+      <!-- Mobile Navigation (hidden on desktop) -->
+      <nav class="mobile-nav">
+        <button class="mobile-nav-button" data-panel="left">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"/></svg>
+          <span>Playlist</span>
+        </button>
+        <button class="mobile-nav-button active" data-panel="center">
+          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <span>Player</span>
+        </button>
+        <button class="mobile-nav-button" data-panel="right">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          <span>Info</span>
+        </button>
+      </nav>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

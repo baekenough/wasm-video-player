@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebCodecs Debug Test</title>
+  <script>
+    // Auto-run on load
+    window.addEventListener('load', () => {
+      setTimeout(() => window.runTest?.(), 500);
+    });
+  </script>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #fff; }
+    .log { margin: 5px 0; padding: 5px; background: #333; border-radius: 4px; }
+    .error { background: #633; color: #faa; }
+    .success { background: #363; color: #afa; }
+    .info { background: #336; color: #aaf; }
+    button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+    #video-output { margin-top: 20px; }
+    canvas { border: 1px solid #666; }
+  </style>
+</head>
+<body>
+  <h1>WebCodecs Debug Test</h1>
+  <div>
+    <button onclick="runTest()">Test with sample.mp4</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+  </div>
+  <div id="logs"></div>
+  <div id="video-output">
+    <canvas id="canvas" width="640" height="360"></canvas>
+  </div>
+
+  <script type="module">
+    const logsDiv = document.getElementById('logs');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    function log(msg, type = 'info') {
+      const div = document.createElement('div');
+      div.className = `log ${type}`;
+      div.textContent = `[${new Date().toISOString().slice(11,23)}] ${msg}`;
+      logsDiv.appendChild(div);
+      logsDiv.scrollTop = logsDiv.scrollHeight;
+      console.log(msg);
+    }
+
+    window.clearLogs = function() {
+      logsDiv.innerHTML = '';
+    };
+
+    window.runTest = async function() {
+      clearLogs();
+
+      // Step 1: Check secure context
+      log(`Secure context: ${window.isSecureContext}`, window.isSecureContext ? 'success' : 'error');
+      if (!window.isSecureContext) {
+        log('ERROR: Not a secure context! WebCodecs will not work.', 'error');
+        return;
+      }
+
+      // Step 2: Check WebCodecs API
+      log(`VideoDecoder available: ${typeof VideoDecoder !== 'undefined'}`, typeof VideoDecoder !== 'undefined' ? 'success' : 'error');
+      log(`AudioDecoder available: ${typeof AudioDecoder !== 'undefined'}`, typeof AudioDecoder !== 'undefined' ? 'success' : 'error');
+      log(`EncodedVideoChunk available: ${typeof EncodedVideoChunk !== 'undefined'}`, typeof EncodedVideoChunk !== 'undefined' ? 'success' : 'error');
+
+      if (typeof VideoDecoder === 'undefined') {
+        log('ERROR: WebCodecs API not available!', 'error');
+        return;
+      }
+
+      // Step 3: Load MP4Box
+      log('Loading mp4box.js...');
+      try {
+        const MP4Box = (await import('https://esm.sh/mp4box@0.5.2')).default;
+        log('mp4box.js loaded successfully', 'success');
+
+        // Step 4: Fetch video file
+        log('Fetching sample.mp4...');
+        const response = await fetch('/sample.mp4');
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const buffer = await response.arrayBuffer();
+        log(`Fetched ${buffer.byteLength} bytes`, 'success');
+
+        // Step 5: Parse with MP4Box
+        log('Parsing MP4 container...');
+        const mp4file = MP4Box.createFile();
+
+        let videoTrack = null;
+        let videoDecoder = null;
+        let frameCount = 0;
+
+        mp4file.onReady = async (info) => {
+          log(`MP4 parsed: duration=${info.duration/info.timescale}s, tracks=${info.tracks.length}`, 'success');
+
+          for (const track of info.tracks) {
+            log(`  Track ${track.id}: ${track.type}, codec=${track.codec}`);
+          }
+
+          // Find video track
+          videoTrack = info.videoTracks[0];
+          if (!videoTrack) {
+            log('ERROR: No video track found!', 'error');
+            return;
+          }
+
+          log(`Video track: ${videoTrack.codec}, ${videoTrack.track_width}x${videoTrack.track_height}`);
+
+          // Step 6: Check codec support
+          const codecConfig = {
+            codec: videoTrack.codec,
+            codedWidth: videoTrack.track_width,
+            codedHeight: videoTrack.track_height,
+          };
+
+          try {
+            const support = await VideoDecoder.isConfigSupported(codecConfig);
+            log(`Codec ${videoTrack.codec} supported: ${support.supported}`, support.supported ? 'success' : 'error');
+
+            if (!support.supported) {
+              log('ERROR: Video codec not supported!', 'error');
+              return;
+            }
+          } catch (e) {
+            log(`Codec check error: ${e.message}`, 'error');
+            return;
+          }
+
+          // Step 7: Create VideoDecoder
+          log('Creating VideoDecoder...');
+          try {
+            videoDecoder = new VideoDecoder({
+              output: (frame) => {
+                frameCount++;
+                log(`Frame ${frameCount}: ${frame.displayWidth}x${frame.displayHeight}, ts=${frame.timestamp}`, 'success');
+
+                // Draw frame to canvas
+                canvas.width = frame.displayWidth;
+                canvas.height = frame.displayHeight;
+                ctx.drawImage(frame, 0, 0);
+                frame.close();
+              },
+              error: (e) => {
+                log(`Decoder error: ${e.message}`, 'error');
+              }
+            });
+
+            // Get codec description (avcC box for H.264)
+            const entry = videoTrack.mdia?.minf?.stbl?.stsd?.entries?.[0];
+            let description = undefined;
+            if (entry?.avcC) {
+              const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
+              entry.avcC.write(stream);
+              description = new Uint8Array(stream.buffer, 8);
+              log(`Got avcC description: ${description.length} bytes`);
+            }
+
+            const config = {
+              codec: videoTrack.codec,
+              codedWidth: videoTrack.track_width,
+              codedHeight: videoTrack.track_height,
+              description: description,
+            };
+
+            videoDecoder.configure(config);
+            log('VideoDecoder configured', 'success');
+
+            // Set extraction options
+            mp4file.setExtractionOptions(videoTrack.id, null, { nbSamples: 10 });
+            mp4file.start();
+
+          } catch (e) {
+            log(`VideoDecoder creation error: ${e.message}`, 'error');
+            console.error(e);
+          }
+        };
+
+        mp4file.onSamples = (trackId, ref, samples) => {
+          log(`Got ${samples.length} samples from track ${trackId}`);
+
+          for (const sample of samples) {
+            try {
+              const chunk = new EncodedVideoChunk({
+                type: sample.is_sync ? 'key' : 'delta',
+                timestamp: sample.cts * 1000000 / sample.timescale,
+                duration: sample.duration * 1000000 / sample.timescale,
+                data: sample.data
+              });
+
+              if (videoDecoder && videoDecoder.state === 'configured') {
+                videoDecoder.decode(chunk);
+              }
+            } catch (e) {
+              log(`Sample decode error: ${e.message}`, 'error');
+            }
+          }
+        };
+
+        mp4file.onError = (e) => {
+          log(`MP4Box error: ${e}`, 'error');
+        };
+
+        // Feed data to MP4Box
+        buffer.fileStart = 0;
+        mp4file.appendBuffer(buffer);
+        mp4file.flush();
+
+      } catch (e) {
+        log(`Error: ${e.message}`, 'error');
+        console.error(e);
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,509 @@
+/**
+ * Video Player Controls Stylesheet
+ *
+ * Dark theme with Netflix-inspired accent color.
+ * Uses CSS custom properties for easy theming.
+ */
+
+/* ================================================
+   CSS Custom Properties (Theme Variables)
+   ================================================ */
+
+:root {
+  /* Colors */
+  --control-bg-primary: #0d0d0d;
+  --control-bg-secondary: #1a1a1a;
+  --control-accent: #e50914;
+  --control-accent-hover: #f40612;
+  --control-text: #ffffff;
+  --control-text-muted: #b3b3b3;
+
+  /* Spacing */
+  --control-padding: 12px 16px;
+  --control-gap: 12px;
+
+  /* Transitions */
+  --control-transition-fast: 150ms ease;
+  --control-transition-normal: 250ms ease;
+  --control-transition-slow: 400ms ease;
+
+  /* Sizes */
+  --control-button-size: 40px;
+  --control-icon-size: 24px;
+  --control-slider-height: 4px;
+  --control-slider-thumb-size: 14px;
+}
+
+/* ================================================
+   Control Bar Container
+   ================================================ */
+
+.control-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.7) 50%,
+    transparent 100%
+  );
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--control-transition-normal),
+    visibility var(--control-transition-normal);
+  z-index: 10;
+}
+
+/* Progress bar container */
+.control-progress-container {
+  width: 100%;
+  padding: 0 4px;
+}
+
+.control-progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: height 0.15s ease;
+}
+
+.control-progress:hover {
+  height: 8px;
+}
+
+.control-progress::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--control-accent);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.control-progress::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--control-accent);
+  cursor: pointer;
+}
+
+.control-progress::-webkit-slider-thumb:hover {
+  transform: scale(1.3);
+}
+
+.control-progress::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--control-accent) 0%, var(--control-accent) var(--progress, 0%), rgba(255, 255, 255, 0.2) var(--progress, 0%));
+  border-radius: 3px;
+}
+
+/* Controls row */
+.control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.control-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.control-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Control buttons */
+.control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--control-text);
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.control-btn:active {
+  transform: scale(0.95);
+}
+
+.control-play-pause {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--control-accent);
+}
+
+.control-play-pause:hover {
+  background: var(--control-accent-hover);
+}
+
+/* Time display */
+.control-time {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 13px;
+  color: var(--control-text);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.control-current-time {
+  color: var(--control-text);
+}
+
+.control-duration {
+  color: var(--control-text-muted);
+}
+
+/* Volume control */
+.control-volume {
+  width: 80px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.control-volume::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--control-text);
+  cursor: pointer;
+}
+
+.control-volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--control-text);
+  cursor: pointer;
+}
+
+.control-mute {
+  padding: 6px;
+}
+
+.control-bar.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ================================================
+   Play Button
+   ================================================ */
+
+.play-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-button-size);
+  height: var(--control-button-size);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--control-accent);
+  color: var(--control-text);
+  cursor: pointer;
+  transition:
+    background-color var(--control-transition-fast),
+    transform var(--control-transition-fast);
+}
+
+.play-button:hover {
+  background-color: var(--control-accent-hover);
+  transform: scale(1.05);
+}
+
+.play-button:focus {
+  outline: 2px solid var(--control-accent);
+  outline-offset: 2px;
+}
+
+.play-button:active {
+  transform: scale(0.95);
+}
+
+.play-button svg {
+  width: var(--control-icon-size);
+  height: var(--control-icon-size);
+}
+
+/* ================================================
+   Time Display
+   ================================================ */
+
+.time-display {
+  display: flex;
+  align-items: center;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 13px;
+  color: var(--control-text);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.time-current {
+  color: var(--control-text);
+}
+
+.time-separator {
+  color: var(--control-text-muted);
+  margin: 0 2px;
+}
+
+.time-total {
+  color: var(--control-text-muted);
+}
+
+/* ================================================
+   Volume Control
+   ================================================ */
+
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volume-mute-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--control-text);
+  cursor: pointer;
+  transition:
+    background-color var(--control-transition-fast),
+    color var(--control-transition-fast);
+}
+
+.volume-mute-button:hover {
+  background-color: var(--control-bg-secondary);
+}
+
+.volume-mute-button:focus {
+  outline: 2px solid var(--control-accent);
+  outline-offset: 2px;
+}
+
+.volume-mute-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Volume Slider */
+.volume-slider {
+  width: 80px;
+  height: var(--control-slider-height);
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--control-bg-secondary);
+  border-radius: calc(var(--control-slider-height) / 2);
+  cursor: pointer;
+  transition: background var(--control-transition-fast);
+}
+
+.volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: var(--control-slider-thumb-size);
+  height: var(--control-slider-thumb-size);
+  border-radius: 50%;
+  background: var(--control-text);
+  cursor: pointer;
+  transition:
+    background var(--control-transition-fast),
+    transform var(--control-transition-fast);
+}
+
+.volume-slider::-moz-range-thumb {
+  width: var(--control-slider-thumb-size);
+  height: var(--control-slider-thumb-size);
+  border: none;
+  border-radius: 50%;
+  background: var(--control-text);
+  cursor: pointer;
+  transition:
+    background var(--control-transition-fast),
+    transform var(--control-transition-fast);
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+  background: var(--control-accent);
+  transform: scale(1.2);
+}
+
+.volume-slider::-moz-range-thumb:hover {
+  background: var(--control-accent);
+  transform: scale(1.2);
+}
+
+.volume-slider:focus {
+  outline: none;
+}
+
+.volume-slider:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--control-accent);
+}
+
+.volume-slider:focus::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--control-accent);
+}
+
+/* ================================================
+   Fullscreen Button
+   ================================================ */
+
+.fullscreen-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin-left: auto;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--control-text);
+  cursor: pointer;
+  transition:
+    background-color var(--control-transition-fast),
+    color var(--control-transition-fast);
+}
+
+.fullscreen-button:hover {
+  background-color: var(--control-bg-secondary);
+}
+
+.fullscreen-button:focus {
+  outline: 2px solid var(--control-accent);
+  outline-offset: 2px;
+}
+
+.fullscreen-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ================================================
+   Progress Bar (future enhancement)
+   ================================================ */
+
+.progress-bar {
+  flex: 1;
+  height: var(--control-slider-height);
+  background: var(--control-bg-secondary);
+  border-radius: calc(var(--control-slider-height) / 2);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--control-accent);
+  border-radius: calc(var(--control-slider-height) / 2);
+  transition: width var(--control-transition-fast);
+}
+
+.progress-bar:hover .progress-bar-fill {
+  background: var(--control-accent-hover);
+}
+
+/* ================================================
+   Responsive Adjustments
+   ================================================ */
+
+@media (max-width: 640px) {
+  :root {
+    --control-button-size: 36px;
+    --control-icon-size: 20px;
+    --control-gap: 8px;
+  }
+
+  .control-bar {
+    padding: 8px 12px;
+  }
+
+  .time-display {
+    font-size: 11px;
+  }
+
+  .volume-slider {
+    width: 60px;
+  }
+}
+
+/* ================================================
+   Animation Utilities
+   ================================================ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Loading state */
+.control-bar.loading .play-button {
+  animation: pulse 1.5s ease-in-out infinite;
+}

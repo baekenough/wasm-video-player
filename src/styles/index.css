@@ -1,0 +1,18 @@
+/**
+ * Main CSS Entry Point
+ *
+ * Imports all stylesheets in the correct order.
+ * Import this file in your main.ts or index.html.
+ */
+
+/* Base styles and CSS variables */
+@import './main.css';
+
+/* Layout styles */
+@import './layout.css';
+
+/* Component styles */
+@import './player.css';
+@import './controls.css';
+@import './file-loader.css';
+@import './settings-panel.css';

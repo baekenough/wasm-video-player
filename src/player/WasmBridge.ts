@@ -8,7 +8,7 @@
  * 3. WASM module - Fallback decoder
  */
 
-import { WebCodecsDecoder, type DecodedVideoFrame } from './WebCodecsDecoder';
+import { WebCodecsDecoder, type DecodedVideoFrame, type DecodedAudioData } from './WebCodecsDecoder';
 import { Demuxer, type VideoSample, type AudioSample } from './Demuxer';
 import { FFmpegDecoder, type TranscodeProgress } from './FFmpegDecoder';
 import { createLogger } from '../utils/debug';
@@ -79,6 +79,8 @@ export interface WasmBridgeConfig {
   preferredBackends?: DecoderBackend[];
   /** Force FFmpeg for all files (useful for testing) */
   forceFFmpeg?: boolean;
+  /** Audio player for playback (optional, for audio sample playback) */
+  audioPlayer?: import('./AudioPlayer').AudioPlayer;
 }
 
 /**
@@ -171,6 +173,9 @@ export class WasmBridge {
       this.webCodecsDecoder = new WebCodecsDecoder({
         onVideoFrame: (frame: DecodedVideoFrame) => {
           this.handleWebCodecsVideoFrame(frame);
+        },
+        onAudioData: (audioData) => {
+          this.handleWebCodecsAudioData(audioData);
         },
         onError: (error: Error) => {
           log.error('WebCodecs decoder error:', error);
@@ -265,6 +270,56 @@ export class WasmBridge {
         // Release the VideoFrame
         frame.close();
       });
+  }
+
+  /**
+   * Handle decoded audio data from WebCodecs
+   */
+  private handleWebCodecsAudioData(decodedAudio: DecodedAudioData): void {
+    const audioData = decodedAudio.data;
+
+    // If no audio player configured, skip audio playback
+    if (!this.config.audioPlayer) {
+      audioData.close();
+      return;
+    }
+
+    try {
+      // Extract audio samples to Float32Array
+      const numberOfFrames = audioData.numberOfFrames;
+      const numberOfChannels = audioData.numberOfChannels;
+      const sampleRate = audioData.sampleRate;
+
+      // Allocate buffer for interleaved audio data
+      const audioBuffer = new Float32Array(numberOfFrames * numberOfChannels);
+
+      // Copy audio data (WebCodecs AudioData uses planar format by default)
+      // We need to copy each channel and interleave
+      for (let channel = 0; channel < numberOfChannels; channel++) {
+        const channelData = new Float32Array(numberOfFrames);
+
+        // Copy planar channel data
+        audioData.copyTo(channelData, {
+          planeIndex: channel,
+          format: 'f32-planar',
+        });
+
+        // Interleave into output buffer
+        for (let frame = 0; frame < numberOfFrames; frame++) {
+          audioBuffer[frame * numberOfChannels + channel] = channelData[frame]!;
+        }
+      }
+
+      // Play audio buffer (AudioPlayer handles sequential scheduling automatically)
+      this.config.audioPlayer.playBuffer(audioBuffer);
+
+      log.debug('Audio decoded:', numberOfFrames, 'frames,', numberOfChannels, 'ch,', sampleRate, 'Hz');
+    } catch (error) {
+      log.error('Failed to play audio data:', error);
+    } finally {
+      // Always close AudioData to free resources
+      audioData.close();
+    }
   }
 
   /**
@@ -537,6 +592,10 @@ export class WasmBridge {
       break;
     }
 
+    // Process pending audio samples BEFORE returning video frame
+    // This ensures audio decoding runs in parallel with video during normal playback
+    this.decodeAudioSamples();
+
     // Return queued frame if available
     if (this.webCodecsFrameQueue.length > 0) {
       return this.webCodecsFrameQueue.shift()!;
@@ -553,7 +612,7 @@ export class WasmBridge {
         'sampleQueue=', this.videoSampleQueue.length, 'target=', this.seekTargetTimestamp);
     }
 
-    // Process pending samples
+    // Process pending video samples
     if (this.videoSampleQueue.length > 0) {
       // VideoDecoder requires a keyframe after configure/flush
       // Skip non-keyframe samples until we get a keyframe
@@ -601,6 +660,33 @@ export class WasmBridge {
     }
 
     return null;
+  }
+
+  /**
+   * Decode audio samples (called during video decoding loop)
+   * Processes audio samples asynchronously and sends to AudioPlayer
+   */
+  private decodeAudioSamples(): void {
+    // Skip if no audio decoder or audio player
+    if (!this.webCodecsDecoder || !this.webCodecsDecoder.isAudioInitialized()) {
+      return;
+    }
+
+    // Process multiple audio samples per frame (audio samples are much smaller than video frames)
+    const maxAudioSamplesPerFrame = 10;
+    let samplesProcessed = 0;
+
+    while (this.audioSampleQueue.length > 0 && samplesProcessed < maxAudioSamplesPerFrame) {
+      const sample = this.audioSampleQueue.shift()!;
+      const chunk = Demuxer.createAudioChunk(sample);
+
+      // Decode asynchronously (onAudioData callback will handle playback)
+      void this.webCodecsDecoder.decodeAudio(chunk).catch((error: Error) => {
+        log.error('Audio decode failed:', error);
+      });
+
+      samplesProcessed++;
+    }
   }
 
   /**

@@ -45,10 +45,18 @@ vi.mock('@renderer/WebGLRenderer', () => ({
 
 vi.mock('@player/AudioPlayer', () => ({
   AudioPlayer: vi.fn().mockImplementation(() => ({
+    init: vi.fn().mockResolvedValue(undefined),
+    resume: vi.fn().mockResolvedValue(undefined),
+    pause: vi.fn(),
     setVolume: vi.fn(),
     getVolume: vi.fn().mockReturnValue(1.0),
     mute: vi.fn(),
     unmute: vi.fn(),
+    isMuted: vi.fn().mockReturnValue(false),
+    isInitialized: vi.fn().mockReturnValue(true),
+    getCurrentTime: vi.fn().mockReturnValue(0),
+    getState: vi.fn().mockReturnValue('running'),
+    resetSchedule: vi.fn(),
     dispose: vi.fn(),
   })),
 }));

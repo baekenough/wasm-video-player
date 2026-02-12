@@ -96,6 +96,7 @@
   right: 0;
   bottom: 0;
   z-index: var(--z-overlay, 100);
+  pointer-events: none;
 }
 
 /* ================================================

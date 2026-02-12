@@ -272,6 +272,149 @@ export class TimelineThumbnails {
   }
 
   /**
+   * Generate thumbnails from data URLs (fallback method)
+   * Used when FFmpegDecoder is not available
+   */
+  async generateThumbnailsFromDataUrls(
+    dataUrls: Array<{ timestamp: number; dataUrl: string; width: number; height: number }>,
+    duration: number
+  ): Promise<void> {
+    if (this.isGenerating) {
+      console.warn('Thumbnail generation already in progress');
+      return;
+    }
+
+    this.isGenerating = true;
+    this.abortGeneration = false;
+    this.config.onGenerationStart?.();
+
+    try {
+      this.duration = duration;
+      this.interval = duration / (dataUrls.length - 1 || 1);
+
+      // Initialize thumbnails from data URLs
+      this.thumbnails = dataUrls.map((item) => ({
+        timestamp: item.timestamp,
+        dataUrl: item.dataUrl,
+        width: item.width,
+        height: item.height,
+        loading: false,
+      }));
+
+      // Render thumbnails
+      this.renderThumbnails();
+
+      this.config.onGenerationComplete?.();
+    } catch (error) {
+      console.error('Failed to generate thumbnails from data URLs:', error);
+      this.showError('Failed to generate thumbnails');
+    } finally {
+      this.isGenerating = false;
+    }
+  }
+
+  /**
+   * Generate thumbnails from video element (fallback method)
+   * Used when FFmpegDecoder is not available
+   */
+  async generateThumbnailsFromVideoElement(file: File, videoDuration: number): Promise<void> {
+    if (this.isGenerating) {
+      console.warn('Thumbnail generation already in progress');
+      return;
+    }
+
+    this.isGenerating = true;
+    this.abortGeneration = false;
+    this.config.onGenerationStart?.();
+
+    try {
+      this.duration = videoDuration;
+      this.interval = calculateInterval(this.duration);
+
+      const numThumbnails = Math.ceil(this.duration / this.interval);
+
+      // Initialize placeholders
+      this.thumbnails = [];
+      for (let i = 0; i < numThumbnails; i++) {
+        const timestamp = i * this.interval;
+        if (timestamp <= this.duration) {
+          this.thumbnails.push({
+            timestamp,
+            dataUrl: null,
+            width: this.config.thumbnailWidth,
+            height: Math.round((this.config.thumbnailWidth / 16) * 9), // assume 16:9
+            loading: true,
+          });
+        }
+      }
+      this.renderThumbnails();
+
+      // Create hidden video element
+      const video = document.createElement('video');
+      video.muted = true;
+      video.preload = 'auto';
+      const url = URL.createObjectURL(file);
+      video.src = url;
+
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error('Failed to load video'));
+      });
+
+      // Update aspect ratio from actual video
+      const aspectRatio = video.videoHeight / video.videoWidth;
+      for (const thumb of this.thumbnails) {
+        thumb.height = Math.round(this.config.thumbnailWidth * aspectRatio);
+      }
+
+      // Generate each thumbnail
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Failed to get canvas context');
+      }
+
+      for (let i = 0; i < this.thumbnails.length; i++) {
+        if (this.abortGeneration) break;
+
+        const thumbnail = this.thumbnails[i]!;
+
+        try {
+          // Seek video to timestamp
+          video.currentTime = thumbnail.timestamp;
+          await new Promise<void>((resolve) => {
+            video.onseeked = () => resolve();
+          });
+
+          // Draw frame to canvas
+          canvas.width = thumbnail.width;
+          canvas.height = thumbnail.height;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          thumbnail.dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          thumbnail.loading = false;
+          this.renderThumbnails();
+
+          this.config.onGenerationProgress?.(i + 1, this.thumbnails.length);
+        } catch {
+          thumbnail.loading = false;
+        }
+      }
+
+      // Cleanup
+      URL.revokeObjectURL(url);
+      video.remove();
+
+      this.config.onGenerationComplete?.();
+    } catch (error) {
+      console.error('Failed to generate thumbnails from video element:', error);
+      this.showError('Failed to generate thumbnails');
+    } finally {
+      this.isGenerating = false;
+    }
+  }
+
+  /**
    * Render all thumbnails
    */
   private renderThumbnails(): void {

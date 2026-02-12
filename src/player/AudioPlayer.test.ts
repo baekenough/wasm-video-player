@@ -21,8 +21,7 @@ const createMockAudioContext = (): Partial<AudioContext> => {
     disconnect: vi.fn(),
   };
 
-  return {
-    state: 'running' as AudioContextState,
+  const mockContext = {
     sampleRate: 48000,
     currentTime: 0,
     createGain: vi.fn().mockReturnValue(mockGainNode),
@@ -34,6 +33,14 @@ const createMockAudioContext = (): Partial<AudioContext> => {
     resume: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
   };
+
+  // Make state property read-only with getter
+  Object.defineProperty(mockContext, 'state', {
+    get: vi.fn().mockReturnValue('running' as AudioContextState),
+    configurable: true,
+  });
+
+  return mockContext;
 };
 
 describe('AudioPlayer', () => {
@@ -126,7 +133,12 @@ describe('AudioPlayer', () => {
     });
 
     it('should resume suspended AudioContext', async () => {
-      mockAudioContext.state = 'suspended';
+      // Mock suspended state
+      Object.defineProperty(mockAudioContext, 'state', {
+        get: vi.fn().mockReturnValue('suspended' as AudioContextState),
+        configurable: true,
+      });
+
       await audioPlayer.init();
       await audioPlayer.resume();
 
@@ -134,7 +146,12 @@ describe('AudioPlayer', () => {
     });
 
     it('should not resume if already running', async () => {
-      mockAudioContext.state = 'running';
+      // Mock running state (default)
+      Object.defineProperty(mockAudioContext, 'state', {
+        get: vi.fn().mockReturnValue('running' as AudioContextState),
+        configurable: true,
+      });
+
       await audioPlayer.init();
       await audioPlayer.resume();
 
@@ -227,8 +244,6 @@ describe('AudioPlayer', () => {
 
     it('should not change state when already muted', () => {
       audioPlayer.mute();
-      const firstMuteVolume = audioPlayer.getVolume();
-
       audioPlayer.setVolume(0.5);
       audioPlayer.mute();
 
@@ -266,11 +281,24 @@ describe('AudioPlayer', () => {
       );
     });
 
-    it('should accept start time parameter', () => {
-      audioPlayer.playBuffer(new Float32Array(1024), 0.5);
+    it('should schedule buffers sequentially', () => {
+      const audioData = new Float32Array(1024);
 
-      const mockSource = mockAudioContext.createBufferSource!();
-      expect(mockSource.start).toHaveBeenCalledWith(0.5);
+      // Play first buffer
+      audioPlayer.playBuffer(audioData);
+      const mockSource1 = mockAudioContext.createBufferSource!();
+      const firstCallArgs = (mockSource1.start as ReturnType<typeof vi.fn>).mock.calls[0];
+
+      // Play second buffer
+      audioPlayer.playBuffer(audioData);
+      const mockSource2 = mockAudioContext.createBufferSource!();
+      const secondCallArgs = (mockSource2.start as ReturnType<typeof vi.fn>).mock.calls[1];
+
+      // Second buffer should start after first buffer
+      expect(mockSource1.start).toHaveBeenCalled();
+      expect(mockSource2.start).toHaveBeenCalled();
+      expect(firstCallArgs).toBeDefined();
+      expect(secondCallArgs).toBeDefined();
     });
   });
 

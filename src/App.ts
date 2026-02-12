@@ -182,16 +182,9 @@ export class App {
       throw new Error(`Video canvas "${this.config.videoCanvasId}" not found`);
     }
 
-    // Initialize WASM bridge
-    this.wasmBridge = new WasmBridge();
-    await this.wasmBridge.init();
-
-    // Initialize WebGL renderer
-    this.renderer = new WebGLRenderer(videoCanvas);
-    await this.renderer.init();
-
-    // Initialize audio player
+    // Initialize audio player FIRST (needed by WasmBridge)
     this.audioPlayer = new AudioPlayer();
+    await this.audioPlayer.init(); // CRITICAL: Initialize AudioContext
     const audioSettings = this.settings?.get('audio');
     if (audioSettings) {
       this.audioPlayer.setVolume(audioSettings.volume);
@@ -199,6 +192,16 @@ export class App {
         this.audioPlayer.mute();
       }
     }
+
+    // Initialize WASM bridge with audio player
+    this.wasmBridge = new WasmBridge({
+      audioPlayer: this.audioPlayer,
+    });
+    await this.wasmBridge.init();
+
+    // Initialize WebGL renderer
+    this.renderer = new WebGLRenderer(videoCanvas);
+    await this.renderer.init();
 
     // Create player instance
     this.player = new Player({
@@ -632,24 +635,153 @@ export class App {
    * Generate timeline thumbnails for the loaded video
    */
   private async generateTimelineThumbnails(file: File): Promise<void> {
-    if (!this.timelineThumbnails || !this.wasmBridge) {
+    if (!this.timelineThumbnails) {
       return;
     }
 
-    const ffmpegDecoder = this.wasmBridge.getFFmpegDecoder();
-    if (!ffmpegDecoder) {
-      log.warn('FFmpeg decoder not available, cannot generate thumbnails');
+    // Try FFmpeg first (higher quality, more format support)
+    if (this.wasmBridge) {
+      const ffmpegDecoder = this.wasmBridge.getFFmpegDecoder();
+      if (ffmpegDecoder) {
+        try {
+          this.timelineThumbnails.clear();
+          await this.timelineThumbnails.generateThumbnails(ffmpegDecoder, file);
+          return;
+        } catch (error) {
+          log.warn('FFmpeg thumbnail generation failed, using fallback:', error);
+        }
+      }
+    }
+
+    // Fallback: use <video> element for thumbnail generation
+    const duration = this.player?.getDuration() ?? 0;
+    if (duration > 0) {
+      try {
+        this.timelineThumbnails.clear();
+        await this.timelineThumbnails.generateThumbnailsFromVideoElement(file, duration);
+      } catch (error) {
+        log.error('Failed to generate timeline thumbnails:', error);
+      }
+    }
+  }
+
+  /**
+   * Fallback method to generate thumbnails using video element and canvas
+   * Used when FFmpegDecoder is not available (SharedArrayBuffer not supported)
+   */
+  private async generateThumbnailsWithVideoElement(file: File): Promise<void> {
+    if (!this.timelineThumbnails) {
       return;
     }
+
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+
+    const canvas = document.createElement('canvas');
+    const thumbnailWidth = 120;
 
     try {
       // Clear previous thumbnails
       this.timelineThumbnails.clear();
 
-      // Generate new thumbnails
-      await this.timelineThumbnails.generateThumbnails(ffmpegDecoder, file);
+      // Load video metadata
+      const videoUrl = URL.createObjectURL(file);
+
+      await new Promise<void>((resolve, reject) => {
+        const handleLoadedMetadata = (): void => {
+          resolve();
+        };
+
+        const handleError = (): void => {
+          reject(new Error('Failed to load video metadata'));
+        };
+
+        video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+        video.addEventListener('error', handleError, { once: true });
+        video.src = videoUrl;
+      });
+
+      const duration = video.duration;
+
+      // Calculate thumbnail interval (same logic as TimelineThumbnails)
+      const interval = this.calculateThumbnailInterval(duration);
+      const numThumbnails = Math.ceil(duration / interval);
+
+      // Calculate canvas dimensions based on video aspect ratio
+      const aspectRatio = video.videoWidth / video.videoHeight;
+      canvas.width = thumbnailWidth;
+      canvas.height = Math.round(thumbnailWidth / aspectRatio);
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Failed to get canvas context');
+      }
+
+      // Extract thumbnails at evenly spaced intervals
+      const thumbnails: Array<{ timestamp: number; dataUrl: string; width: number; height: number }> = [];
+
+      for (let i = 0; i < numThumbnails; i++) {
+        const timestamp = i * interval;
+
+        if (timestamp > duration) {
+          break;
+        }
+
+        // Seek to timestamp
+        await new Promise<void>((resolve, reject) => {
+          const handleSeeked = (): void => {
+            resolve();
+          };
+
+          const handleError = (): void => {
+            reject(new Error(`Failed to seek to ${timestamp}`));
+          };
+
+          video.addEventListener('seeked', handleSeeked, { once: true });
+          video.addEventListener('error', handleError, { once: true });
+          video.currentTime = timestamp;
+        });
+
+        // Draw frame to canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Convert to data URL
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+        thumbnails.push({
+          timestamp,
+          dataUrl,
+          width: canvas.width,
+          height: canvas.height,
+        });
+      }
+
+      // Generate thumbnails using the new method
+      await this.timelineThumbnails.generateThumbnailsFromDataUrls(thumbnails, duration);
+
+      URL.revokeObjectURL(videoUrl);
+      log.info(`Generated ${thumbnails.length} thumbnails using video element fallback`);
     } catch (error) {
-      log.error('Failed to generate timeline thumbnails:', error);
+      log.error('Failed to generate thumbnails with video element:', error);
+    }
+  }
+
+  /**
+   * Calculate thumbnail interval based on video duration
+   * Matches the logic in TimelineThumbnails.ts
+   */
+  private calculateThumbnailInterval(durationSeconds: number): number {
+    if (durationSeconds < 15) {
+      return Math.max(5, durationSeconds / 2);
+    } else if (durationSeconds < 60) {
+      return 15;
+    } else if (durationSeconds < 300) {
+      return 60;
+    } else if (durationSeconds < 1800) {
+      return 300;
+    } else {
+      return 600;
     }
   }
 

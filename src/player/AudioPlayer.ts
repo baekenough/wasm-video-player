@@ -34,6 +34,7 @@ export class AudioPlayer {
   private previousVolume: number = 1.0;
   private readonly config: AudioConfig;
   private initialized: boolean = false;
+  private nextStartTime: number = 0;
 
   constructor(config: Partial<AudioConfig> = {}) {
     this.config = { ...defaultConfig, ...config };
@@ -92,6 +93,15 @@ export class AudioPlayer {
       this.sourceNode.stop();
       this.sourceNode = null;
     }
+    this.nextStartTime = 0;
+  }
+
+  /**
+   * Reset audio scheduling timeline
+   * Call this when seeking or starting new playback to reset the buffer schedule
+   */
+  resetSchedule(): void {
+    this.nextStartTime = 0;
   }
 
   /**
@@ -152,8 +162,9 @@ export class AudioPlayer {
 
   /**
    * Play audio buffer
+   * Automatically schedules consecutive buffers sequentially to avoid overlapping
    */
-  playBuffer(audioData: Float32Array, startTime?: number): void {
+  playBuffer(audioData: Float32Array): void {
     if (!this.audioContext || !this.gainNode) {
       throw new Error('AudioPlayer not initialized');
     }
@@ -173,11 +184,21 @@ export class AudioPlayer {
       }
     }
 
+    // Calculate start time to schedule this buffer after previous buffer
+    const now = this.audioContext.currentTime;
+    const startTime = Math.max(now, this.nextStartTime);
+
     // Create and start source
-    this.sourceNode = this.audioContext.createBufferSource();
-    this.sourceNode.buffer = buffer;
-    this.sourceNode.connect(this.gainNode);
-    this.sourceNode.start(startTime ?? 0);
+    const source = this.audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.gainNode);
+    source.start(startTime);
+
+    // Update next start time for the following buffer
+    this.nextStartTime = startTime + buffer.duration;
+
+    // Keep reference to the most recent source
+    this.sourceNode = source;
   }
 
   /**

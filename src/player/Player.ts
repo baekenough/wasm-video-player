@@ -58,6 +58,7 @@ export class Player {
   private currentTime: number = 0;
   private duration: number = 0;
   private loop: boolean = false;
+  private wasPlayingBeforeSeek: boolean = false;
   private readonly eventListeners: Map<PlayerEventType, Set<PlayerEventListener>> = new Map();
 
   constructor(config: PlayerConfig) {
@@ -154,7 +155,11 @@ export class Player {
     // Clamp time to valid range [0, duration]
     const clampedTime = Math.max(0, Math.min(time, this.duration));
 
-    const wasPlaying = this.state === PlayerState.Playing;
+    // Remember if we were playing before the first seek in a sequence
+    // Only capture when NOT already seeking (to preserve original state across rapid seeks)
+    if (this.state !== PlayerState.Seeking) {
+      this.wasPlayingBeforeSeek = this.state === PlayerState.Playing;
+    }
 
     // CRITICAL: Stop playback loop before seeking to prevent race conditions
     this.stopPlaybackLoop();
@@ -165,7 +170,7 @@ export class Player {
       this.currentTime = clampedTime;
       this.emit('timeupdate', { currentTime: this.currentTime });
 
-      if (wasPlaying) {
+      if (this.wasPlayingBeforeSeek) {
         this.setState(PlayerState.Playing);
         this.startPlaybackLoop();
       } else {

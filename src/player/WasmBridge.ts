@@ -108,6 +108,7 @@ export class WasmBridge {
   private readonly config: WasmBridgeConfig;
   private transcodedBuffer: ArrayBuffer | null = null;
   private needsKeyframe: boolean = true; // VideoDecoder requires keyframe after configure/flush
+  private seekGeneration: number = 0;
 
   constructor(config: WasmBridgeConfig = {}) {
     this.config = config;
@@ -236,12 +237,19 @@ export class WasmBridge {
     // Create RGBA buffer
     const data = new Uint8Array(width * height * 4);
 
+    // Capture current generation to detect stale frames after async copyTo
+    const generation = this.seekGeneration;
+
     // Copy frame data to buffer (async operation)
     frame
       .copyTo(data, {
         format: 'RGBA',
       })
       .then(() => {
+        // Discard frame if a seek occurred during copyTo
+        if (generation !== this.seekGeneration) {
+          return;
+        }
         this.webCodecsFrameQueue.push({
           data,
           width,
@@ -607,6 +615,9 @@ export class WasmBridge {
         throw new Error('Seek operation failed');
       }
     } else if (this.backend === 'webcodecs') {
+      // Increment generation to invalidate in-flight frame copies
+      this.seekGeneration++;
+
       // Flush decoders - waits for pending decodes to complete
       await this.webCodecsDecoder?.flushVideo();
       await this.webCodecsDecoder?.flushAudio();

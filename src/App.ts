@@ -360,7 +360,7 @@ export class App {
    */
   private addToPlaylist(file: File, duration?: number): void {
     const id = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const durationStr = duration ? LayoutManager.formatDuration(duration / 1000) : undefined;
+    const durationStr = duration ? LayoutManager.formatDuration(duration) : undefined;
     const item: PlaylistItem = {
       id,
       name: file.name,
@@ -408,8 +408,8 @@ export class App {
       container: thumbnailContainer,
       thumbnailWidth: 120,
       onSeek: (timestamp: number) => {
-        // Seek to the thumbnail position (convert seconds to milliseconds)
-        this.player?.seek(timestamp * 1000);
+        // Seek to the thumbnail position (timestamp is already in seconds)
+        this.player?.seek(timestamp);
       },
       onGenerationStart: () => {
         log.debug('Thumbnail generation started');
@@ -606,7 +606,7 @@ export class App {
       // Update video info panel
       const duration = this.player?.getDuration() ?? 0;
       this.layoutManager?.setVideoInfo({
-        duration: LayoutManager.formatDuration(duration / 1000),
+        duration: LayoutManager.formatDuration(duration),
         resolution: this.getVideoResolution(),
         codec: this.getVideoCodec(),
         bitrate: this.getVideoBitrate(),
@@ -617,7 +617,7 @@ export class App {
 
       // Add to watch history
       const watchHistory = getWatchHistory();
-      watchHistory.addToHistory(file.name, 0, duration / 1000, file.size);
+      watchHistory.addToHistory(file.name, 0, duration, file.size);
 
       // Generate timeline thumbnails
       await this.generateTimelineThumbnails(file);
@@ -827,10 +827,9 @@ export class App {
     }
 
     // Get current time in seconds
-    const currentTimeMs = this.player.getCurrentTime();
-    const currentTimeSec = currentTimeMs / 1000;
+    const currentTime = this.player.getCurrentTime();
 
-    this.timelineThumbnails.setCurrentTime(currentTimeSec);
+    this.timelineThumbnails.setCurrentTime(currentTime);
   }
 
   /**
@@ -978,7 +977,7 @@ export class App {
       watchHistory.updateProgress(this._currentVideoFile.name, progress);
 
       // Also update file list if it's showing the same folder
-      this.fileList?.updateProgress(this._currentVideoFile.name, progress, duration / 1000);
+      this.fileList?.updateProgress(this._currentVideoFile.name, progress, duration);
     }
   }
 

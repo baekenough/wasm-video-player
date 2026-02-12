@@ -1,8 +1,11 @@
 # WASM Video Player
 
-WebAssembly 기반의 고성능 웹 비디오 플레이어입니다. FFmpeg 수준의 포맷 지원과 부드러운 탐색 성능을 제공합니다.
+[![Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://wasm-video-player.vercel.app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-[English](./README.md)
+> **[라이브 데모](https://wasm-video-player.vercel.app)** | [English](./README.md)
+
+WebAssembly 기반의 고성능 웹 비디오 플레이어입니다. FFmpeg 수준의 포맷 지원과 부드러운 탐색 성능을 제공합니다.
 
 ## 주요 기능
 
@@ -13,6 +16,10 @@ WebAssembly 기반의 고성능 웹 비디오 플레이어입니다. FFmpeg 수�
 - **키보드 컨트롤**: 방향키로 5초, Shift+방향키로 60초 이동
 - **자막 지원**: SRT, ASS/SSA 포맷
 - **모던 UI**: 넷플릭스 스타일의 다크 테마, 반응형 디자인
+- **폴더 브라우저**: File System Access API를 통한 로컬 폴더 탐색
+- **시청 기록**: 비디오별 재생 진행률 자동 저장
+- **타임라인 썸네일**: 탐색 바에 비주얼 프리뷰 썸네일
+- **재생목록**: 여러 비디오 파일 큐잉 및 관리
 - **크로스 플랫폼**: 웹 및 데스크톱(Tauri) 지원
 
 ## 아키텍처
@@ -54,7 +61,7 @@ WebAssembly 기반의 고성능 웹 비디오 플레이어입니다. FFmpeg 수�
 
 ```bash
 # 저장소 복제
-git clone https://github.com/user/wasm-video-player.git
+git clone https://github.com/baekenough/wasm-video-player.git
 cd wasm-video-player
 
 # 의존성 설치
@@ -263,6 +270,19 @@ interface Settings {
   };
 }
 ```
+
+## 프라이버시
+
+모든 데이터는 사용자의 기기에만 저장됩니다. 서버 저장소, 분석, 추적이 없습니다.
+
+| 데이터 | 저장소 | 범위 |
+|--------|--------|------|
+| 설정 | localStorage | 브라우저 origin별 격리 |
+| 시청 기록 | localStorage | 브라우저 origin별 격리 |
+| 폴더 핸들 | IndexedDB | 브라우저 origin별 격리 |
+| 썸네일 | 메모리 전용 | 세션 한정 |
+
+외부 서버로 데이터가 전송되지 않습니다. `fetch` API는 사용자가 제공한 URL에서 비디오 파일을 로드하는 데만 사용됩니다.
 
 ## 설계 원칙
 

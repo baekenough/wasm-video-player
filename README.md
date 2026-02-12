@@ -1,8 +1,11 @@
 # WASM Video Player
 
-A high-performance, web-based video player with WebAssembly-powered decoding. Supports FFmpeg-level format coverage with smooth seek performance.
+[![Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://wasm-video-player.vercel.app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-[한국어](./README_ko.md)
+> **[Live Demo](https://wasm-video-player.vercel.app)** | [한국어](./README_ko.md)
+
+A high-performance, web-based video player with WebAssembly-powered decoding. Supports FFmpeg-level format coverage with smooth seek performance.
 
 ## Features
 
@@ -13,6 +16,10 @@ A high-performance, web-based video player with WebAssembly-powered decoding. Su
 - **Keyboard Controls**: Arrow keys for 5s seek, Shift+Arrow for 60s seek
 - **Subtitle Support**: SRT and ASS/SSA formats
 - **Modern UI**: Netflix-inspired dark theme with responsive design
+- **Folder Browser**: Browse local folders via File System Access API
+- **Watch History**: Auto-save playback progress per video
+- **Timeline Thumbnails**: Visual preview thumbnails on the seek bar
+- **Playlist**: Queue and manage multiple video files
 - **Cross-Platform**: Web and Desktop (via Tauri)
 
 ## Architecture
@@ -54,7 +61,7 @@ A high-performance, web-based video player with WebAssembly-powered decoding. Su
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/wasm-video-player.git
+git clone https://github.com/baekenough/wasm-video-player.git
 cd wasm-video-player
 
 # Install dependencies
@@ -263,6 +270,19 @@ interface Settings {
   };
 }
 ```
+
+## Privacy
+
+All data stays on your device. No server-side storage, no analytics, no tracking.
+
+| Data | Storage | Scope |
+|------|---------|-------|
+| Settings | localStorage | Browser-origin isolated |
+| Watch History | localStorage | Browser-origin isolated |
+| Folder Handles | IndexedDB | Browser-origin isolated |
+| Thumbnails | In-memory only | Session-scoped |
+
+No data is transmitted to external servers. The `fetch` API is only used to load video files from user-provided URLs.
 
 ## Design Principles
 

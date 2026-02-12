@@ -1,0 +1,19 @@
+{
+  "name": "player-core",
+  "type": "module",
+  "collaborators": [
+    "sangyi"
+  ],
+  "description": "WASM Video Player Core - High-performance video decoding",
+  "version": "0.1.0",
+  "files": [
+    "player_core_bg.wasm",
+    "player_core.js",
+    "player_core.d.ts"
+  ],
+  "main": "player_core.js",
+  "types": "player_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

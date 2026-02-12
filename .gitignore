@@ -3,8 +3,6 @@ node_modules/
 
 # Build outputs
 dist/
-pkg/
-*.wasm
 
 # Test outputs
 coverage/
@@ -50,3 +48,4 @@ Cargo.lock
 
 # TypeScript
 *.tsbuildinfo
+.vercel

@@ -49,6 +49,7 @@ const createMockAudioPlayer = (): AudioPlayer =>
     init: vi.fn().mockResolvedValue(undefined),
     resume: vi.fn().mockResolvedValue(undefined),
     pause: vi.fn(),
+    resetSchedule: vi.fn(),
     setVolume: vi.fn(),
     getVolume: vi.fn().mockReturnValue(1.0),
     mute: vi.fn(),

@@ -2,8 +2,11 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
+// Tauri provides its own secure context, so basicSsl is not needed
+const isTauri = !!process.env.TAURI_ENV_PLATFORM;
+
 export default defineConfig({
-  plugins: [basicSsl()],
+  plugins: isTauri ? [] : [basicSsl()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -23,7 +26,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3002,
-    open: true,
+    open: !isTauri,
     headers: {
       // Required for ffmpeg.wasm SharedArrayBuffer support
       'Cross-Origin-Opener-Policy': 'same-origin',

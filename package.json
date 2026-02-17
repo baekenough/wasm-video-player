@@ -14,7 +14,9 @@
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "wasm:build": "cd crates/player-core && wasm-pack build --target web --out-dir ../../pkg",
-    "wasm:dev": "cd crates/player-core && wasm-pack build --target web --dev --out-dir ../../pkg"
+    "wasm:dev": "cd crates/player-core && wasm-pack build --target web --dev --out-dir ../../pkg",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -23,6 +25,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/cli": "^2.10.0",
     "@types/dom-webcodecs": "^0.1.11",
     "@types/jsdom": "^27.0.0",
     "@types/node": "^20.10.0",

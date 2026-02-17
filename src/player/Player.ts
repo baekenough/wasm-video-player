@@ -163,6 +163,8 @@ export class Player {
 
     // CRITICAL: Stop playback loop before seeking to prevent race conditions
     this.stopPlaybackLoop();
+    this.audioPlayer.pause();
+    this.audioPlayer.resetSchedule();
     this.setState(PlayerState.Seeking);
 
     try {

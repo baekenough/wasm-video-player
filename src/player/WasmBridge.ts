@@ -615,7 +615,6 @@ export class WasmBridge {
     // Process pending video samples
     if (this.videoSampleQueue.length > 0) {
       // VideoDecoder requires a keyframe after configure/flush
-      // Skip non-keyframe samples until we get a keyframe
       if (this.needsKeyframe) {
         while (this.videoSampleQueue.length > 0) {
           const sample = this.videoSampleQueue.peek()!;
@@ -623,11 +622,9 @@ export class WasmBridge {
             this.needsKeyframe = false;
             break;
           }
-          // Skip non-keyframe
           this.videoSampleQueue.shift();
         }
 
-        // Still need keyframe but none found
         if (this.needsKeyframe || this.videoSampleQueue.length === 0) {
           return null;
         }
@@ -637,21 +634,26 @@ export class WasmBridge {
         return null;
       }
 
-      const sample = this.videoSampleQueue.shift()!;
+      // Batch decode: feed up to 5 samples during seek, 1 during normal playback
+      const batchSize = this.seekTargetTimestamp > 0 ? 5 : 1;
+      let decoded = 0;
 
-      // Final safety check - verify we have a keyframe when needed
-      if (this.needsKeyframe && !sample.keyframe) {
-        this.needsKeyframe = true;
-        return null;
+      while (this.videoSampleQueue.length > 0 && decoded < batchSize) {
+        const sample = this.videoSampleQueue.shift()!;
+
+        if (this.needsKeyframe && !sample.keyframe) {
+          this.needsKeyframe = true;
+          return null;
+        }
+
+        const chunk = Demuxer.createVideoChunk(sample);
+
+        void this.webCodecsDecoder.decodeVideo(chunk).catch((_error: Error) => {
+          this.needsKeyframe = true;
+        });
+
+        decoded++;
       }
-
-      const chunk = Demuxer.createVideoChunk(sample);
-
-      // Don't await - let it process asynchronously
-      void this.webCodecsDecoder.decodeVideo(chunk).catch((_error: Error) => {
-        // If decode fails, we need a keyframe again
-        this.needsKeyframe = true;
-      });
 
       // Try to return a frame that may have been decoded
       if (this.webCodecsFrameQueue.length > 0) {
@@ -700,13 +702,15 @@ export class WasmBridge {
       if (!success) {
         throw new Error('Seek operation failed');
       }
-    } else if (this.backend === 'webcodecs') {
-      // Increment generation to invalidate in-flight frame copies
+    } else if (this.backend === 'webcodecs' || this.backend === 'ffmpeg') {
+      // WebCodecs + FFmpeg backends (both use WebCodecs decoder for playback)
       this.seekGeneration++;
 
-      // Flush decoders - waits for pending decodes to complete
-      await this.webCodecsDecoder?.flushVideo();
-      await this.webCodecsDecoder?.flushAudio();
+      // Parallel flush — no reason to wait sequentially
+      await Promise.all([
+        this.webCodecsDecoder?.flushVideo(),
+        this.webCodecsDecoder?.flushAudio(),
+      ]);
 
       // Clear frame queue AFTER flush to discard any produced frames
       this.webCodecsFrameQueue.clear();
@@ -715,11 +719,7 @@ export class WasmBridge {
       this.needsKeyframe = true;
 
       // Re-populate queues from persistent storage
-      // Convert timestamp from seconds to microseconds for sample comparison
       const targetTimestampUs = timestamp * 1_000_000;
-
-      // Store seek target in SECONDS - frames before this will be decoded but skipped in output
-      // (frame.timestamp is in seconds after conversion in handleWebCodecsVideoFrame)
       this.seekTargetTimestamp = timestamp;
 
       // Find the keyframe at or before the target time
@@ -751,6 +751,41 @@ export class WasmBridge {
 
       log.debug('seek: videoQueue=', this.videoSampleQueue.length,
         'audioQueue=', this.audioSampleQueue.length);
+
+      // Burst pre-decode: prime the pipeline so frames are ready when playback resumes
+      await this.burstDecode();
+    }
+  }
+
+  /**
+   * Burst pre-decode: prime the WebCodecs pipeline after seek
+   * Feeds up to 15 samples into the decoder at once so frames are
+   * ready when playback resumes, eliminating the startup stall.
+   */
+  private async burstDecode(): Promise<void> {
+    if (!this.webCodecsDecoder || !this.webCodecsDecoder.isVideoInitialized()) return;
+
+    // Skip non-keyframe samples if we need a keyframe
+    if (this.needsKeyframe) {
+      while (this.videoSampleQueue.length > 0) {
+        const sample = this.videoSampleQueue.peek()!;
+        if (sample.keyframe) {
+          this.needsKeyframe = false;
+          break;
+        }
+        this.videoSampleQueue.shift();
+      }
+      if (this.needsKeyframe) return;
+    }
+
+    // Feed up to 15 samples into the decoder at once
+    const burstCount = Math.min(15, this.videoSampleQueue.length);
+    for (let i = 0; i < burstCount; i++) {
+      const sample = this.videoSampleQueue.shift()!;
+      const chunk = Demuxer.createVideoChunk(sample);
+      this.webCodecsDecoder.decodeVideo(chunk).catch(() => {
+        this.needsKeyframe = true;
+      });
     }
   }
 

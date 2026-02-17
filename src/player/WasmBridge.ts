@@ -30,12 +30,19 @@ export interface VideoMetadata {
 /**
  * Decoded video frame (compatible with both WASM and WebCodecs)
  */
+/**
+ * Browser-native VideoFrame type reference (avoids conflict with legacy alias below)
+ */
+type NativeVideoFrame = globalThis.VideoFrame;
+
 export interface DecodedFrame {
   data: Uint8Array;
   width: number;
   height: number;
   timestamp: number;
   keyframe: boolean;
+  /** Raw VideoFrame for zero-copy GPU rendering (WebCodecs backend only) */
+  videoFrame?: NativeVideoFrame;
 }
 
 /**
@@ -105,8 +112,14 @@ export class WasmBridge {
   // Persistent storage for all samples (for seeking)
   private allVideoSamples: VideoSample[] = [];
   private allAudioSamples: AudioSample[] = [];
+  // Pre-built keyframe index for O(log n) seek
+  private keyframeIndices: number[] = [];
   // Seek target timestamp in SECONDS - frames before this are skipped during playback
   private seekTargetTimestamp: number = 0;
+  // Index-based access: after first seek, read directly from allVideoSamples/allAudioSamples
+  private videoSampleIndex: number = 0;
+  private audioSampleIndex: number = 0;
+  private useIndexMode: boolean = false;
   private readonly config: WasmBridgeConfig;
   private transcodedBuffer: ArrayBuffer | null = null;
   private needsKeyframe: boolean = true; // VideoDecoder requires keyframe after configure/flush
@@ -232,44 +245,21 @@ export class WasmBridge {
   }
 
   /**
-   * Handle decoded video frame from WebCodecs
+   * Handle decoded video frame from WebCodecs.
+   * Zero-copy path: stores the raw VideoFrame for direct GPU rendering,
+   * avoiding the expensive GPU→CPU→GPU round-trip.
    */
   private handleWebCodecsVideoFrame(decodedFrame: DecodedVideoFrame): void {
     const frame = decodedFrame.frame;
-    const width = frame.displayWidth;
-    const height = frame.displayHeight;
 
-    // Create RGBA buffer
-    const data = new Uint8Array(width * height * 4);
-
-    // Capture current generation to detect stale frames after async copyTo
-    const generation = this.seekGeneration;
-
-    // Copy frame data to buffer (async operation)
-    frame
-      .copyTo(data, {
-        format: 'RGBA',
-      })
-      .then(() => {
-        // Discard frame if a seek occurred during copyTo
-        if (generation !== this.seekGeneration) {
-          return;
-        }
-        this.webCodecsFrameQueue.push({
-          data,
-          width,
-          height,
-          timestamp: decodedFrame.timestamp / 1_000_000, // Convert microseconds to seconds
-          keyframe: decodedFrame.keyframe,
-        });
-      })
-      .catch((error: Error) => {
-        log.error('Failed to copy frame data:', error);
-      })
-      .finally(() => {
-        // Release the VideoFrame
-        frame.close();
-      });
+    this.webCodecsFrameQueue.push({
+      data: new Uint8Array(0), // Not used in zero-copy path
+      videoFrame: frame,       // Raw VideoFrame — renderer will close it after use
+      width: frame.displayWidth,
+      height: frame.displayHeight,
+      timestamp: decodedFrame.timestamp / 1_000_000,
+      keyframe: decodedFrame.keyframe,
+    });
   }
 
   /**
@@ -457,10 +447,14 @@ export class WasmBridge {
     // Reset state for new video
     this.videoSampleQueue.clear();
     this.audioSampleQueue.clear();
-    this.webCodecsFrameQueue.clear();
+    this.clearFrameQueue();
     // Reset persistent sample storage
     this.allVideoSamples = [];
     this.allAudioSamples = [];
+    this.keyframeIndices = [];
+    this.useIndexMode = false;
+    this.videoSampleIndex = 0;
+    this.audioSampleIndex = 0;
     this.needsKeyframe = true;
 
     // Reset WebCodecs decoders
@@ -475,10 +469,15 @@ export class WasmBridge {
       onVideoSample: (sample: VideoSample) => {
         // Store in both queue (for playback) and persistent storage (for seeking)
         this.videoSampleQueue.push(sample);
+        const idx = this.allVideoSamples.length;
         this.allVideoSamples.push(sample);
+        // Build keyframe index for O(log n) seek
+        if (sample.keyframe) {
+          this.keyframeIndices.push(idx);
+        }
         // Debug: log first and every 100th sample
-        if (this.allVideoSamples.length === 1 || this.allVideoSamples.length % 100 === 0) {
-          log.debug('Sample stored:', this.allVideoSamples.length, 'timestamp:', sample.timestamp, 'keyframe:', sample.keyframe);
+        if (idx === 0 || (idx + 1) % 100 === 0) {
+          log.debug('Sample stored:', idx + 1, 'timestamp:', sample.timestamp, 'keyframe:', sample.keyframe);
         }
       },
       onAudioSample: (sample: AudioSample) => {
@@ -574,6 +573,55 @@ export class WasmBridge {
   }
 
   /**
+   * Get the next video sample from either the index or the queue.
+   * In index mode (after seek), reads directly from allVideoSamples.
+   * In queue mode (initial playback), reads from the demuxer-fed queue.
+   */
+  private nextVideoSample(): VideoSample | undefined {
+    if (this.useIndexMode) {
+      if (this.videoSampleIndex < this.allVideoSamples.length) {
+        return this.allVideoSamples[this.videoSampleIndex++];
+      }
+      return undefined;
+    }
+    return this.videoSampleQueue.shift();
+  }
+
+  /**
+   * Peek at the next video sample without consuming it.
+   */
+  private peekVideoSample(): VideoSample | undefined {
+    if (this.useIndexMode) {
+      if (this.videoSampleIndex < this.allVideoSamples.length) {
+        return this.allVideoSamples[this.videoSampleIndex];
+      }
+      return undefined;
+    }
+    return this.videoSampleQueue.peek();
+  }
+
+  /**
+   * Check if there are more video samples available.
+   */
+  private hasVideoSamples(): boolean {
+    if (this.useIndexMode) {
+      return this.videoSampleIndex < this.allVideoSamples.length;
+    }
+    return this.videoSampleQueue.length > 0;
+  }
+
+  /**
+   * Skip the current video sample (advance without returning).
+   */
+  private skipVideoSample(): void {
+    if (this.useIndexMode) {
+      this.videoSampleIndex++;
+    } else {
+      this.videoSampleQueue.shift();
+    }
+  }
+
+  /**
    * Decode frame using WebCodecs backend
    */
   private decodeFrameWithWebCodecs(): DecodedFrame | null {
@@ -582,8 +630,9 @@ export class WasmBridge {
     while (this.webCodecsFrameQueue.length > 0 && this.seekTargetTimestamp > 0) {
       const frame = this.webCodecsFrameQueue.peek()!;
       if (frame.timestamp < this.seekTargetTimestamp) {
-        // Skip this frame
-        this.webCodecsFrameQueue.shift();
+        // Skip this frame, closing its VideoFrame to prevent GPU memory leaks
+        const skipped = this.webCodecsFrameQueue.shift()!;
+        skipped.videoFrame?.close();
         continue;
       }
       // Found a frame at or after target
@@ -613,33 +662,33 @@ export class WasmBridge {
     }
 
     // Process pending video samples
-    if (this.videoSampleQueue.length > 0) {
+    if (this.hasVideoSamples()) {
       // VideoDecoder requires a keyframe after configure/flush
       if (this.needsKeyframe) {
-        while (this.videoSampleQueue.length > 0) {
-          const sample = this.videoSampleQueue.peek()!;
+        while (this.hasVideoSamples()) {
+          const sample = this.peekVideoSample()!;
           if (sample.keyframe) {
             this.needsKeyframe = false;
             break;
           }
-          this.videoSampleQueue.shift();
+          this.skipVideoSample();
         }
 
-        if (this.needsKeyframe || this.videoSampleQueue.length === 0) {
+        if (this.needsKeyframe || !this.hasVideoSamples()) {
           return null;
         }
       }
 
-      if (this.videoSampleQueue.length === 0) {
+      if (!this.hasVideoSamples()) {
         return null;
       }
 
-      // Batch decode: feed up to 5 samples during seek, 1 during normal playback
-      const batchSize = this.seekTargetTimestamp > 0 ? 5 : 1;
+      // Batch decode: feed up to 10 samples during seek, 1 during normal playback
+      const batchSize = this.seekTargetTimestamp > 0 ? 10 : 1;
       let decoded = 0;
 
-      while (this.videoSampleQueue.length > 0 && decoded < batchSize) {
-        const sample = this.videoSampleQueue.shift()!;
+      while (this.hasVideoSamples() && decoded < batchSize) {
+        const sample = this.nextVideoSample()!;
 
         if (this.needsKeyframe && !sample.keyframe) {
           this.needsKeyframe = true;
@@ -678,8 +727,14 @@ export class WasmBridge {
     const maxAudioSamplesPerFrame = 10;
     let samplesProcessed = 0;
 
-    while (this.audioSampleQueue.length > 0 && samplesProcessed < maxAudioSamplesPerFrame) {
-      const sample = this.audioSampleQueue.shift()!;
+    while (samplesProcessed < maxAudioSamplesPerFrame) {
+      let sample: AudioSample | undefined;
+      if (this.useIndexMode && this.audioSampleIndex < this.allAudioSamples.length) {
+        sample = this.allAudioSamples[this.audioSampleIndex++];
+      } else if (!this.useIndexMode && this.audioSampleQueue.length > 0) {
+        sample = this.audioSampleQueue.shift();
+      }
+      if (!sample) break;
       const chunk = Demuxer.createAudioChunk(sample);
 
       // Decode asynchronously (onAudioData callback will handle playback)
@@ -706,51 +761,64 @@ export class WasmBridge {
       // WebCodecs + FFmpeg backends (both use WebCodecs decoder for playback)
       this.seekGeneration++;
 
-      // Parallel flush — no reason to wait sequentially
-      await Promise.all([
-        this.webCodecsDecoder?.flushVideo(),
-        this.webCodecsDecoder?.flushAudio(),
-      ]);
+      // Soft-reset decoders: instantly drops all pending work (synchronous, ~0ms)
+      // Much faster than flush() which awaits ALL pending decode operations
+      this.webCodecsDecoder?.softResetVideo();
+      this.webCodecsDecoder?.softResetAudio();
 
-      // Clear frame queue AFTER flush to discard any produced frames
-      this.webCodecsFrameQueue.clear();
+      // Clear frame queue, closing VideoFrames to prevent GPU memory leaks
+      this.clearFrameQueue();
 
-      // Need keyframe after flush
+      // Need keyframe after reset
       this.needsKeyframe = true;
 
       // Re-populate queues from persistent storage
       const targetTimestampUs = timestamp * 1_000_000;
       this.seekTargetTimestamp = timestamp;
 
-      // Find the keyframe at or before the target time
+      // Binary search for the keyframe at or before the target time — O(log n)
       let keyframeIndex = 0;
-      for (let i = this.allVideoSamples.length - 1; i >= 0; i--) {
-        if (this.allVideoSamples[i]!.keyframe && this.allVideoSamples[i]!.timestamp <= targetTimestampUs) {
-          keyframeIndex = i;
-          break;
+      if (this.keyframeIndices.length > 0) {
+        let lo = 0;
+        let hi = this.keyframeIndices.length - 1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >>> 1;
+          if (this.allVideoSamples[this.keyframeIndices[mid]!]!.timestamp <= targetTimestampUs) {
+            keyframeIndex = this.keyframeIndices[mid]!;
+            lo = mid + 1;
+          } else {
+            hi = mid - 1;
+          }
         }
       }
 
       log.debug('seek: target=', timestamp, 's',
         'keyframeIndex=', keyframeIndex, 'totalSamples=', this.allVideoSamples.length);
 
-      // Re-populate video queue from keyframe
+      // Set index pointers instead of copying into queues — O(1) instead of O(n)
       this.videoSampleQueue.clear();
-      for (let i = keyframeIndex; i < this.allVideoSamples.length; i++) {
-        this.videoSampleQueue.push(this.allVideoSamples[i]);
-      }
-
-      // For audio, find samples at or after target time
       this.audioSampleQueue.clear();
-      const audioStartIndex = this.allAudioSamples.findIndex(s => s.timestamp >= targetTimestampUs);
-      if (audioStartIndex >= 0) {
-        for (let i = audioStartIndex; i < this.allAudioSamples.length; i++) {
-          this.audioSampleQueue.push(this.allAudioSamples[i]);
+      this.videoSampleIndex = keyframeIndex;
+      this.useIndexMode = true;
+
+      // Binary search for audio start index — O(log n)
+      this.audioSampleIndex = this.allAudioSamples.length; // default: no audio
+      {
+        let lo = 0;
+        let hi = this.allAudioSamples.length - 1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >>> 1;
+          if (this.allAudioSamples[mid]!.timestamp >= targetTimestampUs) {
+            this.audioSampleIndex = mid;
+            hi = mid - 1;
+          } else {
+            lo = mid + 1;
+          }
         }
       }
 
-      log.debug('seek: videoQueue=', this.videoSampleQueue.length,
-        'audioQueue=', this.audioSampleQueue.length);
+      log.debug('seek: videoIndex=', this.videoSampleIndex,
+        'audioIndex=', this.audioSampleIndex, 'totalVideo=', this.allVideoSamples.length);
 
       // Burst pre-decode: prime the pipeline so frames are ready when playback resumes
       await this.burstDecode();
@@ -767,25 +835,38 @@ export class WasmBridge {
 
     // Skip non-keyframe samples if we need a keyframe
     if (this.needsKeyframe) {
-      while (this.videoSampleQueue.length > 0) {
-        const sample = this.videoSampleQueue.peek()!;
+      while (this.hasVideoSamples()) {
+        const sample = this.peekVideoSample()!;
         if (sample.keyframe) {
           this.needsKeyframe = false;
           break;
         }
-        this.videoSampleQueue.shift();
+        this.skipVideoSample();
       }
       if (this.needsKeyframe) return;
     }
 
+    // Count available samples for burst
+    let availableSamples: number;
+    if (this.useIndexMode) {
+      availableSamples = this.allVideoSamples.length - this.videoSampleIndex;
+    } else {
+      availableSamples = this.videoSampleQueue.length;
+    }
+
     // Feed up to 15 samples into the decoder at once
-    const burstCount = Math.min(15, this.videoSampleQueue.length);
+    const burstCount = Math.min(15, availableSamples);
     for (let i = 0; i < burstCount; i++) {
-      const sample = this.videoSampleQueue.shift()!;
+      const sample = this.nextVideoSample()!;
       const chunk = Demuxer.createVideoChunk(sample);
       this.webCodecsDecoder.decodeVideo(chunk).catch(() => {
         this.needsKeyframe = true;
       });
+    }
+
+    // Flush to ensure burst-decoded frames are available immediately
+    if (burstCount > 0) {
+      await this.webCodecsDecoder.flushVideo();
     }
   }
 
@@ -807,8 +888,11 @@ export class WasmBridge {
    * Check if samples are exhausted and need reload
    */
   needsSampleReload(): boolean {
-    if (this.backend !== 'webcodecs') {
+    if (this.backend !== 'webcodecs' && this.backend !== 'ffmpeg') {
       return false;
+    }
+    if (this.useIndexMode) {
+      return this.videoSampleIndex >= this.allVideoSamples.length && this.webCodecsFrameQueue.length === 0;
     }
     return this.videoSampleQueue.length === 0 && this.webCodecsFrameQueue.length === 0;
   }
@@ -839,6 +923,16 @@ export class WasmBridge {
   }
 
   /**
+   * Clear the frame queue, closing any raw VideoFrames to prevent GPU memory leaks.
+   */
+  private clearFrameQueue(): void {
+    while (this.webCodecsFrameQueue.length > 0) {
+      const frame = this.webCodecsFrameQueue.shift()!;
+      frame.videoFrame?.close();
+    }
+  }
+
+  /**
    * Clean up resources
    */
   dispose(): void {
@@ -864,7 +958,8 @@ export class WasmBridge {
 
     this.videoSampleQueue.clear();
     this.audioSampleQueue.clear();
-    this.webCodecsFrameQueue.clear();
+    this.clearFrameQueue();
+    this.keyframeIndices = [];
     this.transcodedBuffer = null;
     this.initialized = false;
     this.metadata = null;

@@ -76,6 +76,8 @@ export class WebCodecsDecoder {
   private readonly config: WebCodecsDecoderConfig;
   private videoInitialized: boolean = false;
   private audioInitialized: boolean = false;
+  private lastVideoConfig: VideoDecoderConfig | null = null;
+  private lastAudioConfig: AudioDecoderConfig | null = null;
   private pendingVideoFrames: number = 0;
   private pendingAudioFrames: number = 0;
 
@@ -220,6 +222,7 @@ export class WebCodecsDecoder {
       },
     });
 
+    this.lastVideoConfig = decoderConfig;
     this.videoDecoder.configure(decoderConfig);
     this.videoInitialized = true;
   }
@@ -271,6 +274,7 @@ export class WebCodecsDecoder {
       },
     });
 
+    this.lastAudioConfig = decoderConfig;
     this.audioDecoder.configure(decoderConfig);
     this.audioInitialized = true;
   }
@@ -406,6 +410,35 @@ export class WebCodecsDecoder {
   }
 
   /**
+   * Soft-reset the video decoder: instantly drops all pending decode operations,
+   * then re-configures with the stored config. Much faster than flush() which
+   * waits for all pending frames to be output.
+   *
+   * Use this during seek to avoid blocking on old decode work.
+   */
+  softResetVideo(): void {
+    if (!this.videoDecoder || this.videoDecoder.state === 'closed' || !this.lastVideoConfig) {
+      return;
+    }
+    this.videoDecoder.reset(); // Instant — drops all pending work
+    this.videoDecoder.configure(this.lastVideoConfig); // Re-enable decode()
+    this.pendingVideoFrames = 0;
+    // Note: videoInitialized stays true since we've reconfigured
+  }
+
+  /**
+   * Soft-reset the audio decoder.
+   */
+  softResetAudio(): void {
+    if (!this.audioDecoder || this.audioDecoder.state === 'closed' || !this.lastAudioConfig) {
+      return;
+    }
+    this.audioDecoder.reset();
+    this.audioDecoder.configure(this.lastAudioConfig);
+    this.pendingAudioFrames = 0;
+  }
+
+  /**
    * Reset the video decoder state
    * After reset, the decoder is in 'unconfigured' state and must be reconfigured
    */
@@ -476,5 +509,7 @@ export class WebCodecsDecoder {
     this.audioInitialized = false;
     this.pendingVideoFrames = 0;
     this.pendingAudioFrames = 0;
+    this.lastVideoConfig = null;
+    this.lastAudioConfig = null;
   }
 }

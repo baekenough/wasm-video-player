@@ -307,8 +307,9 @@ export class Player {
 
       // Try to decode and render frames
       // WebCodecs decodes asynchronously, so we try multiple times per frame
+      // More attempts during seek recovery for faster catch-up
       let frameRendered = false;
-      const maxDecodesPerFrame = 3;
+      const maxDecodesPerFrame = 6;
 
       for (let i = 0; i < maxDecodesPerFrame && !frameRendered; i++) {
         const frame = this.wasmBridge.decodeFrame();

@@ -4,7 +4,7 @@
  * Uses WebGL2 for efficient YUV to RGB conversion and rendering.
  */
 
-import type { VideoFrame } from '@player/WasmBridge';
+import type { DecodedFrame } from '@player/WasmBridge';
 
 /**
  * WebGL shader sources
@@ -134,9 +134,12 @@ export class WebGLRenderer {
   }
 
   /**
-   * Render a video frame
+   * Render a video frame.
+   * Supports two paths:
+   * - Zero-copy: frame.videoFrame (GPU→GPU, no CPU involvement)
+   * - Legacy: frame.data Uint8Array (for WASM backend)
    */
-  render(frame: VideoFrame): void {
+  render(frame: DecodedFrame): void {
     if (!this.initialized || !this.gl || !this.program || !this.texture) {
       throw new Error('Renderer not initialized');
     }
@@ -150,19 +153,35 @@ export class WebGLRenderer {
       gl.viewport(0, 0, frame.width, frame.height);
     }
 
-    // Upload frame data to texture
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      frame.width,
-      frame.height,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      frame.data
-    );
+
+    if (frame.videoFrame) {
+      // Zero-copy path: upload VideoFrame directly to GPU texture
+      // WebGL2 texImage2D accepts VideoFrame as TexImageSource
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        frame.videoFrame as unknown as TexImageSource
+      );
+      // Release the VideoFrame after GPU upload
+      frame.videoFrame.close();
+    } else {
+      // Legacy path: upload Uint8Array (WASM backend)
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        frame.width,
+        frame.height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        frame.data
+      );
+    }
 
     // Clear and draw
     gl.clearColor(0, 0, 0, 1);
